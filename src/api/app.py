@@ -12,10 +12,6 @@ from pydantic import BaseModel
 from healthy_agent.kernel.runtime import Kernel
 from healthy_agent.session import SessionManager
 from healthy_agent.skill import SkillRegistry
-from healthy_agent.skill.builtin import (
-    ReadFileTool, WriteFileTool, ShellTool, HttpTool,
-    SummarizeSkill, CodeGenSkill, WebSearchSkill,
-)
 
 logger = logging.getLogger("healthy_agent.server")
 
@@ -55,6 +51,7 @@ def create_app(
     num_cores: int = 4,
     driver_name: str = "mock",
     model: str | None = None,
+    skills_dir: str | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="Healthy Agent",
@@ -68,13 +65,10 @@ def create_app(
     kernel = Kernel(num_cores=num_cores)
     sessions = SessionManager()
     skills = SkillRegistry()
-    skills.register(ReadFileTool())
-    skills.register(WriteFileTool())
-    skills.register(ShellTool())
-    skills.register(HttpTool())
-    skills.register(SummarizeSkill())
-    skills.register(CodeGenSkill())
-    skills.register(WebSearchSkill())
+    import os
+    from pathlib import Path
+    default_skills_dir = skills_dir or os.environ.get("HA_SKILLS_DIR", str(Path(__file__).parent.parent.parent / "skills"))
+    skills.load_directory(default_skills_dir)
 
     driver = None
     task_results: dict[str, dict] = {}
@@ -355,4 +349,5 @@ def app_instance() -> FastAPI:
         num_cores=int(os.environ.get("HA_CORES", "4")),
         driver_name=os.environ.get("HA_DRIVER", "mock"),
         model=os.environ.get("HA_MODEL"),
+        skills_dir=os.environ.get("HA_SKILLS_DIR"),
     )
