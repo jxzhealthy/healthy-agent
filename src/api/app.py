@@ -13,7 +13,8 @@ from healthy_agent.kernel.runtime import Kernel
 from healthy_agent.session import SessionManager
 from healthy_agent.skill import SkillRegistry
 from healthy_agent.skill.builtin import (
-    SummarizeSkill, CodeGenSkill, ReadFileSkill, WriteFileSkill, ShellSkill, WebSearchSkill,
+    ReadFileTool, WriteFileTool, ShellTool, HttpTool,
+    SummarizeSkill, CodeGenSkill, WebSearchSkill,
 )
 
 logger = logging.getLogger("healthy_agent.server")
@@ -67,11 +68,12 @@ def create_app(
     kernel = Kernel(num_cores=num_cores)
     sessions = SessionManager()
     skills = SkillRegistry()
+    skills.register(ReadFileTool())
+    skills.register(WriteFileTool())
+    skills.register(ShellTool())
+    skills.register(HttpTool())
     skills.register(SummarizeSkill())
     skills.register(CodeGenSkill())
-    skills.register(ReadFileSkill())
-    skills.register(WriteFileSkill())
-    skills.register(ShellSkill())
     skills.register(WebSearchSkill())
 
     driver = None
@@ -256,7 +258,12 @@ def create_app(
 
     @app.get("/skills")
     async def list_skills():
-        return {"skills": skills.list_skills()}
+        all_items = []
+        for s in skills._skills.values():
+            schema = s.to_schema()
+            schema["type"] = "skill" if s.requires_llm else "tool"
+            all_items.append(schema)
+        return {"skills": all_items}
 
     @app.post("/sessions/{session_id}/skills/{skill_name}")
     async def invoke_skill(session_id: str, skill_name: str, req: SkillInvokeRequest):

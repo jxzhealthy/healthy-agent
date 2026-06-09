@@ -77,8 +77,14 @@ button.secondary:hover { background: #475569; }
       <ul class="session-list" id="sessionList"></ul>
     </div>
     <div class="panel" style="margin-top: 16px;">
-      <h2>Skills</h2>
-      <ul class="session-list" id="skillList"><li class="session-item"><div class="meta">loading...</div></li></ul>
+      <details>
+        <summary style="cursor:pointer; font-size:14px; color:#94a3b8; text-transform:uppercase; letter-spacing:1px;">Tools</summary>
+        <ul class="session-list" id="toolList" style="margin-top:8px;"></ul>
+      </details>
+      <details style="margin-top: 12px;">
+        <summary style="cursor:pointer; font-size:14px; color:#94a3b8; text-transform:uppercase; letter-spacing:1px;">Skills (LLM)</summary>
+        <ul class="session-list" id="skillList" style="margin-top:8px;"></ul>
+      </details>
     </div>
   </div>
 
@@ -241,12 +247,14 @@ function escHtml(s) {
 async function refreshSkills() {
   try {
     const d = await api('GET', '/skills');
-    const list = document.getElementById('skillList');
-    if (!d.skills.length) {
-      list.innerHTML = '<li class="session-item"><div class="meta">no skills</div></li>';
-      return;
-    }
-    list.innerHTML = d.skills.map(s =>
+    const tools = d.skills.filter(s => s.type === 'tool');
+    const llmSkills = d.skills.filter(s => s.type === 'skill');
+    const toolList = document.getElementById('toolList');
+    const skillList = document.getElementById('skillList');
+    toolList.innerHTML = tools.length ? tools.map(s =>
+      `<li class="session-item"><b>${s.name}</b><div class="meta">${s.description}</div></li>`
+    ).join('') : '<li class="session-item"><div class="meta">none</div></li>';
+    skillList.innerHTML = llmSkills.length ? llmSkills.map(s =>
       `<li class="session-item"><b>${s.name}</b><div class="meta">${s.description}</div></li>`
     ).join('');
   } catch(e) {}
