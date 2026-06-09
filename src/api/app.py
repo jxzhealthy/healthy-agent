@@ -12,7 +12,9 @@ from pydantic import BaseModel
 from healthy_agent.kernel.runtime import Kernel
 from healthy_agent.session import SessionManager
 from healthy_agent.skill import SkillRegistry
-from healthy_agent.skill.builtin import SummarizeSkill, CodeGenSkill
+from healthy_agent.skill.builtin import (
+    SummarizeSkill, CodeGenSkill, ReadFileSkill, WriteFileSkill, ShellSkill, WebSearchSkill,
+)
 
 logger = logging.getLogger("healthy_agent.server")
 
@@ -67,6 +69,10 @@ def create_app(
     skills = SkillRegistry()
     skills.register(SummarizeSkill())
     skills.register(CodeGenSkill())
+    skills.register(ReadFileSkill())
+    skills.register(WriteFileSkill())
+    skills.register(ShellSkill())
+    skills.register(WebSearchSkill())
 
     driver = None
     task_results: dict[str, dict] = {}

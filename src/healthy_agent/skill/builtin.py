@@ -83,6 +83,101 @@ class CodeGenSkill(Skill):
         return SkillResult(success=False, error=result.error)
 
 
+class ReadFileSkill(Skill):
+    """Read a file's content."""
+
+    @property
+    def name(self) -> str:
+        return "read_file"
+
+    @property
+    def description(self) -> str:
+        return "Read the content of a file at the given path."
+
+    @property
+    def parameters(self) -> list[SkillParam]:
+        return [SkillParam(name="path", type="string", description="File path to read")]
+
+    async def execute(self, params: dict, process: Process, kernel: Kernel) -> SkillResult:
+        from pathlib import Path
+        path = params.get("path", "")
+        if not path:
+            return SkillResult(success=False, error="Missing 'path'")
+        try:
+            content = Path(path).read_text(encoding="utf-8", errors="replace")
+            return SkillResult(success=True, data=content[:50000])
+        except Exception as e:
+            return SkillResult(success=False, error=str(e))
+
+
+class WriteFileSkill(Skill):
+    """Write content to a file."""
+
+    @property
+    def name(self) -> str:
+        return "write_file"
+
+    @property
+    def description(self) -> str:
+        return "Write content to a file at the given path."
+
+    @property
+    def parameters(self) -> list[SkillParam]:
+        return [
+            SkillParam(name="path", type="string", description="File path to write"),
+            SkillParam(name="content", type="string", description="Content to write"),
+        ]
+
+    async def execute(self, params: dict, process: Process, kernel: Kernel) -> SkillResult:
+        from pathlib import Path
+        path = params.get("path", "")
+        content = params.get("content", "")
+        if not path:
+            return SkillResult(success=False, error="Missing 'path'")
+        try:
+            p = Path(path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+            return SkillResult(success=True, data=f"Written {len(content)} bytes to {path}")
+        except Exception as e:
+            return SkillResult(success=False, error=str(e))
+
+
+class ShellSkill(Skill):
+    """Execute a shell command."""
+
+    @property
+    def name(self) -> str:
+        return "shell"
+
+    @property
+    def description(self) -> str:
+        return "Execute a shell command and return stdout/stderr."
+
+    @property
+    def parameters(self) -> list[SkillParam]:
+        return [SkillParam(name="command", type="string", description="Shell command to execute")]
+
+    async def execute(self, params: dict, process: Process, kernel: Kernel) -> SkillResult:
+        import asyncio
+        command = params.get("command", "")
+        if not command:
+            return SkillResult(success=False, error="Missing 'command'")
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
+            output = stdout.decode(errors="replace")[:50000]
+            if proc.returncode == 0:
+                return SkillResult(success=True, data=output)
+            return SkillResult(success=False, data=output, error=stderr.decode(errors="replace")[:5000])
+        except asyncio.TimeoutError:
+            return SkillResult(success=False, error="Command timed out")
+        except Exception as e:
+            return SkillResult(success=False, error=str(e))
+
+
 class WebSearchSkill(Skill):
     """Searches the web using an HTTP driver."""
 

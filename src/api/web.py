@@ -76,6 +76,10 @@ button.secondary:hover { background: #475569; }
       <button onclick="createSession()" style="width:100%; margin-bottom: 12px;">+ New Session</button>
       <ul class="session-list" id="sessionList"></ul>
     </div>
+    <div class="panel" style="margin-top: 16px;">
+      <h2>Skills</h2>
+      <ul class="session-list" id="skillList"><li class="session-item"><div class="meta">loading...</div></li></ul>
+    </div>
   </div>
 
   <div class="panel chat-area">
@@ -234,9 +238,24 @@ function escHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+async function refreshSkills() {
+  try {
+    const d = await api('GET', '/skills');
+    const list = document.getElementById('skillList');
+    if (!d.skills.length) {
+      list.innerHTML = '<li class="session-item"><div class="meta">no skills</div></li>';
+      return;
+    }
+    list.innerHTML = d.skills.map(s =>
+      `<li class="session-item"><b>${s.name}</b><div class="meta">${s.description}</div></li>`
+    ).join('');
+  } catch(e) {}
+}
+
 // Init
 refreshKernel();
 refreshSessions();
+refreshSkills();
 setInterval(refreshKernel, 5000);
 </script>
 </body>
