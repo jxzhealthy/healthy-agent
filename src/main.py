@@ -2,14 +2,14 @@
 Healthy Agent — Start the server.
 
 Usage:
-    python main.py
-    python main.py --port 8000 --cores 4 --driver anthropic --model claude-opus-4-6
+    python src/main.py
+    python src/main.py --port 8000 --cores 4 --driver anthropic --model claude-opus-4-6
 """
 import argparse
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
+sys.path.insert(0, os.path.dirname(__file__))
 
 from healthy_agent.server import create_app
 
