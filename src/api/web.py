@@ -172,8 +172,7 @@ async function loadMessages() {
 }
 
 let ws = null;
-let streamMsgId = null;
-let streamContent = '';
+const pendingMsgs = {};
 
 async function ensureSession() {
   if (!currentSession) {
@@ -184,10 +183,7 @@ async function ensureSession() {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     ws = new WebSocket(`${proto}//${location.host}/ws/${currentSession}`);
-    ws.onmessage = (e) => {
-      const msg = JSON.parse(e.data);
-      handleWsMessage(msg);
-    };
+    ws.onmessage = (e) => handleWsMessage(JSON.parse(e.data));
     ws.onerror = () => appendMsg('system', 'WebSocket error');
     ws.onclose = () => { ws = null; };
     await new Promise(r => { ws.onopen = r; });
@@ -195,31 +191,37 @@ async function ensureSession() {
 }
 
 function handleWsMessage(msg) {
-  if (msg.type === 'stream') {
-    if (!streamMsgId) {
-      streamMsgId = appendMsg('assistant', '');
-    }
-    streamContent += msg.content;
-    const el = document.getElementById(streamMsgId);
-    if (el) el.querySelector('.content').textContent = streamContent;
+  const id = msg.msg_id;
+  if (!id) return;
+
+  if (msg.type === 'thinking') {
+    pendingMsgs[id] = { elId: appendMsg('assistant', '<div class="loading"></div> thinking...'), content: '' };
+  } else if (msg.type === 'stream') {
+    if (!pendingMsgs[id]) pendingMsgs[id] = { elId: appendMsg('assistant', ''), content: '' };
+    pendingMsgs[id].content += msg.content;
+    const el = document.getElementById(pendingMsgs[id].elId);
+    if (el) el.querySelector('.content').textContent = pendingMsgs[id].content;
     scrollBottom();
   } else if (msg.type === 'tool_call') {
     appendMsg('system', `🔧 ${msg.name}(${JSON.stringify(msg.input).slice(0,60)}) → ${(msg.result||'').slice(0,100)}`);
-  } else if (msg.type === 'thinking') {
-    if (!streamMsgId) {
-      streamMsgId = appendMsg('assistant', '<div class="loading"></div> thinking...');
-    }
   } else if (msg.type === 'done') {
-    if (streamMsgId) {
-      const el = document.getElementById(streamMsgId);
+    if (pendingMsgs[id]) {
+      const el = document.getElementById(pendingMsgs[id].elId);
       if (el) el.querySelector('.content').textContent = msg.content;
+      delete pendingMsgs[id];
     } else {
       appendMsg('assistant', msg.content);
     }
-    streamMsgId = null;
-    streamContent = '';
     refreshKernel();
     refreshSessions();
+  } else if (msg.type === 'error') {
+    if (pendingMsgs[id]) {
+      const el = document.getElementById(pendingMsgs[id].elId);
+      if (el) el.querySelector('.content').textContent = '❌ ' + msg.content;
+      delete pendingMsgs[id];
+    } else {
+      appendMsg('system', '❌ ' + msg.content);
+    }
   }
 }
 
@@ -235,10 +237,7 @@ async function sendMessage() {
   if (!prompt) return;
   input.value = '';
   input.focus();
-
   appendMsg('user', prompt);
-  streamMsgId = null;
-  streamContent = '';
   ws.send(JSON.stringify({ prompt, mode: 'agent' }));
 }
 
