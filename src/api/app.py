@@ -97,7 +97,13 @@ def create_app(
             await kernel._shutdown.wait()
             await asyncio.gather(*core_tasks, return_exceptions=True)
 
+        async def _reap_loop():
+            while not kernel._shutdown.is_set():
+                kernel.reap()
+                await asyncio.sleep(30)
+
         asyncio.create_task(_kernel_loop())
+        asyncio.create_task(_reap_loop())
 
     @app.on_event("shutdown")
     async def shutdown():
@@ -252,9 +258,14 @@ def create_app(
     @app.get("/kernel/stats")
     async def kernel_stats():
         stats = kernel.scheduler.stats()
+        active = sum(
+            1 for p in kernel.process_table.values()
+            if p.state.value in ("new", "ready", "running", "blocked")
+        )
         return {
             "cores": kernel.num_cores,
             "processes": len(kernel.process_table),
+            "active": active,
             "scheduler": {
                 "queues": stats.queue_lengths,
                 "scheduled": stats.total_scheduled,

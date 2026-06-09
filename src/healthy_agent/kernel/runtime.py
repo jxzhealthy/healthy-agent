@@ -22,6 +22,8 @@ class Kernel:
         self._events: dict[int, asyncio.Event] = {}
         self._waiters: dict[int, int] = {}
         self._shutdown = asyncio.Event()
+        self._reap_queue: list[tuple[float, int]] = []
+        self._reap_ttl = 60.0
         self._start_time = time.monotonic()
 
     def spawn(
@@ -60,11 +62,12 @@ class Kernel:
         core_tasks = [asyncio.create_task(core.run_loop()) for core in self.cores]
         event = self._get_event(pid)
         await event.wait()
+        result = self.process_table[pid].pcb.result if pid in self.process_table else None
         self._shutdown.set()
         for core in self.cores:
             core.stop()
         await asyncio.gather(*core_tasks, return_exceptions=True)
-        return self.process_table[pid].pcb.result
+        return result
 
     async def wait_pid(self, pid: int) -> Any:
         event = self._get_event(pid)
@@ -90,12 +93,29 @@ class Kernel:
             if waiter and waiter.state == ProcessState.BLOCKED:
                 waiter.pcb.context["wait_result"] = result
                 self.scheduler.unblock(waiter)
+        self._reap_queue.append((time.monotonic() + self._reap_ttl, process.pid))
 
     def io_complete(self, process: Process, result: Any = None) -> None:
         if process.state != ProcessState.BLOCKED:
             return
         process.pcb.context["io_result"] = result
         self.scheduler.unblock(process)
+
+    def reap(self) -> int:
+        now = time.monotonic()
+        reaped = 0
+        remaining = []
+        for deadline, pid in self._reap_queue:
+            if now >= deadline:
+                self.process_table.pop(pid, None)
+                self._events.pop(pid, None)
+                reaped += 1
+            else:
+                remaining.append((deadline, pid))
+        self._reap_queue = remaining
+        if reaped:
+            logger.debug("reaped %d terminated processes", reaped)
+        return reaped
 
     def shutdown(self) -> None:
         logger.info("Kernel shutting down, %d processes total", len(self.process_table))

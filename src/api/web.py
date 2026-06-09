@@ -65,8 +65,8 @@ button.secondary:hover { background: #475569; }
       <h2>Kernel</h2>
       <div class="kernel-stats" id="kernelStats">
         <div class="stat"><div class="num" id="statCores">-</div><div class="label">Cores</div></div>
-        <div class="stat"><div class="num" id="statProcs">-</div><div class="label">Processes</div></div>
-        <div class="stat"><div class="num" id="statSched">-</div><div class="label">Scheduled</div></div>
+        <div class="stat"><div class="num" id="statActive">-</div><div class="label">Active</div></div>
+        <div class="stat"><div class="num" id="statProcs">-</div><div class="label">Total</div></div>
       </div>
     </div>
     <div class="panel">
@@ -103,9 +103,9 @@ async function refreshKernel() {
   try {
     const d = await api('GET', '/kernel/stats');
     document.getElementById('statCores').textContent = d.cores;
+    document.getElementById('statActive').textContent = d.active;
     document.getElementById('statProcs').textContent = d.processes;
-    document.getElementById('statSched').textContent = d.scheduler.scheduled;
-    document.getElementById('kernelStatus').textContent = `${d.cores} cores | ${d.processes} procs`;
+    document.getElementById('kernelStatus').textContent = `${d.cores} cores | ${d.active} active | ${d.processes} total`;
   } catch(e) {
     document.getElementById('kernelStatus').textContent = 'disconnected';
   }
