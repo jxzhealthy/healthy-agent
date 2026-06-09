@@ -85,5 +85,22 @@ def ps(cores: int):
     click.echo("Use 'healthy_agent run' to submit tasks.")
 
 
+@main.command()
+@click.option("--host", default="0.0.0.0", help="Bind host")
+@click.option("--port", "-p", default=8000, help="Bind port")
+@click.option("--cores", "-c", default=4, help="Number of kernel cores")
+@click.option("--driver", "-d", default="mock", help="LLM driver: mock, anthropic, deepseek, zhipu, ollama")
+@click.option("--model", "-m", default=None, help="Model name (defaults per driver)")
+def serve(host: str, port: int, cores: int, driver: str, model: str | None):
+    """Start the HTTP server (Kernel runs persistently)."""
+    import uvicorn
+    from .server import create_app
+    app = create_app(num_cores=cores, driver_name=driver, model=model)
+    click.echo(f"Healthy Agent server starting on {host}:{port}")
+    click.echo(f"  Kernel: {cores} cores | Driver: {driver} | Model: {model or 'default'}")
+    click.echo(f"  Docs: http://{host}:{port}/docs")
+    uvicorn.run(app, host=host, port=port, log_level="info")
+
+
 if __name__ == "__main__":
     main()
