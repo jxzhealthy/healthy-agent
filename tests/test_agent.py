@@ -179,3 +179,177 @@ async def test_workflow_dag():
     assert "analyzed(data)" in result.outputs["analyze"]
     assert "report(" in result.outputs["report"]
     assert result.execution_order.index("fetch") < result.execution_order.index("parse")
+
+
+# --- RAG: TF-IDF scoring ---
+
+def test_rag_tfidf_relevance():
+    """TF-IDF should rank semantically closer docs higher than keyword overlap."""
+    rag = RAGMixin()
+    rag.ingest("Python is a high-level programming language for general purpose")
+    rag.ingest("Rust is a systems programming language focused on safety")
+    rag.ingest("Cooking delicious pasta requires boiling water and salt")
+
+    results = rag.store.search("systems programming safety", top_k=2)
+    assert any("Rust" in d.content for d in results)
+
+
+# --- RAG: text chunking ---
+
+def test_chunk_text_short():
+    from healthy_agent.agent.rag import chunk_text
+    chunks = chunk_text("short text", chunk_size=500)
+    assert chunks == ["short text"]
+
+
+def test_chunk_text_splits():
+    from healthy_agent.agent.rag import chunk_text
+    text = "A" * 200 + "\n\n" + "B" * 200 + "\n\n" + "C" * 200
+    chunks = chunk_text(text, chunk_size=250, chunk_overlap=0)
+    assert len(chunks) >= 2
+
+
+def test_chunk_text_overlap():
+    from healthy_agent.agent.rag import chunk_text
+    text = "word " * 200
+    chunks = chunk_text(text, chunk_size=100, chunk_overlap=20)
+    assert len(chunks) >= 2
+    # Overlap means later chunks contain tail of previous
+    if len(chunks) >= 2:
+        assert len(chunks[1]) > 0
+
+
+# --- RAG: persistence ---
+
+def test_vector_store_persist():
+    import tempfile, os
+    path = os.path.join(tempfile.mkdtemp(), "store.json")
+    store1 = SimpleVectorStore(persist_path=path)
+    store1.add_text("hello world", {"source": "test"})
+    store1.add_text("foo bar baz")
+    assert store1.size == 2
+
+    store2 = SimpleVectorStore(persist_path=path)
+    assert store2.size == 2
+    results = store2.search("hello")
+    assert len(results) >= 1
+    os.unlink(path)
+
+
+# --- RAG: ingest_chunked ---
+
+def test_rag_ingest_chunked():
+    rag = RAGMixin()
+    long_text = "The quick brown fox. " * 100
+    doc_ids = rag.ingest_chunked(long_text, chunk_size=200, chunk_overlap=20, metadata={"src": "test"})
+    assert len(doc_ids) >= 2
+    unique_ids = set(doc_ids)
+    assert rag.store.size == len(unique_ids)
+    assert rag.store.size >= 2
+
+
+# --- Workflow: conditional branching ---
+
+async def test_workflow_condition_skip():
+    async def fetch(process, kernel):
+        return None  # returns None to trigger skip
+
+    async def parse(process, kernel):
+        return "parsed"
+
+    async def fallback(process, kernel):
+        return "fallback_used"
+
+    k = Kernel(num_cores=4)
+    async def parent(process, kernel):
+        wf = Workflow(kernel)
+        wf.add("fetch", fetch)
+        wf.add("parse", parse, depends_on=["fetch"],
+               condition=lambda outputs: outputs.get("fetch") is not None)
+        wf.add("fallback", fallback, depends_on=["fetch"],
+               condition=lambda outputs: outputs.get("fetch") is None)
+        return await wf.execute(process)
+
+    pid = k.spawn("parent", {}, handler=parent, preemptible=False)
+    result = await k.exec(pid)
+    assert result.success
+    assert "parse" in result.skipped
+    assert result.outputs.get("fallback") == "fallback_used"
+
+
+# --- Workflow: step timeout ---
+
+async def test_workflow_step_timeout():
+    import asyncio as _asyncio
+
+    async def slow_step(process, kernel):
+        await _asyncio.sleep(10)
+        return "done"
+
+    async def fast_step(process, kernel):
+        return "fast"
+
+    k = Kernel(num_cores=2)
+    async def parent(process, kernel):
+        wf = Workflow(kernel)
+        wf.add("slow", slow_step, timeout=0.1)
+        wf.add("fast", fast_step)
+        return await wf.execute(process)
+
+    pid = k.spawn("parent", {}, handler=parent, preemptible=False)
+    result = await k.exec(pid)
+    assert result.success
+    assert isinstance(result.outputs["slow"], TimeoutError)
+    assert result.outputs["fast"] == "fast"
+
+
+# --- LoopWorkflow ---
+
+async def test_loop_workflow():
+    from healthy_agent.agent.workflow import LoopWorkflow
+
+    counter = {"value": 0}
+
+    async def increment(process, kernel):
+        counter["value"] += 1
+        return counter["value"]
+
+    k = Kernel(num_cores=2)
+    async def parent(process, kernel):
+        loop = LoopWorkflow(kernel, max_iterations=10)
+        return await loop.execute(
+            process, handler=increment,
+            stop_condition=lambda result, i: result >= 3,
+        )
+
+    pid = k.spawn("parent", {}, handler=parent, preemptible=False)
+    result = await k.exec(pid)
+    assert result.success
+    assert len(result.execution_order) == 3
+    assert result.outputs["loop_iter_2"] == 3
+
+
+# --- MultiAgent: debate with consensus ---
+
+async def test_multi_agent_debate_consensus():
+    async def agree_agent(process, kernel):
+        return "consensus_answer"
+
+    k = Kernel(num_cores=4)
+    async def parent(process, kernel):
+        coord = MultiAgentCoordinator(kernel)
+        result = await coord.debate(
+            [
+                AgentConfig(name="a", handler=agree_agent),
+                AgentConfig(name="b", handler=agree_agent),
+                AgentConfig(name="c", handler=agree_agent),
+            ],
+            process, topic="test question", rounds=3,
+            consensus_threshold=0.5,
+        )
+        return result.results
+
+    pid = k.spawn("parent", {}, handler=parent, preemptible=False)
+    result = await k.exec(pid)
+    assert result.get("consensus") == "consensus_answer"
+    assert result.get("consensus_round") == 0  # First round all agree

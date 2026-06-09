@@ -1,3 +1,3 @@
-from .channel import Channel, Message
+from .channel import Channel, Message, BroadcastChannel, BroadcastSubscription, TopicRouter
 
-__all__ = ["Channel", "Message"]
+__all__ = ["Channel", "Message", "BroadcastChannel", "BroadcastSubscription", "TopicRouter"]

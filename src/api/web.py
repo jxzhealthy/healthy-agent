@@ -147,6 +147,7 @@ async function createSession() {
 }
 
 async function selectSession(sid) {
+  if (currentSession === sid) return;
   currentSession = sid;
   await refreshSessions();
   await loadMessages();
@@ -171,8 +172,36 @@ async function loadMessages() {
   el.scrollTop = el.scrollHeight;
 }
 
-let ws = null;
-const pendingMsgs = {};
+// --- WebSocket connection pool: one connection per session ---
+const wsPool = {};      // sessionId -> WebSocket
+const pendingPool = {};  // sessionId -> { msgId -> { elId, content } }
+
+function getConn(sid) {
+  return wsPool[sid] || null;
+}
+
+function getPending(sid) {
+  if (!pendingPool[sid]) pendingPool[sid] = {};
+  return pendingPool[sid];
+}
+
+function closeWebSocket(sid) {
+  const conn = wsPool[sid];
+  if (conn) {
+    conn.onmessage = null;
+    conn.onerror = null;
+    conn.onclose = null;
+    if (conn.readyState === WebSocket.OPEN || conn.readyState === WebSocket.CONNECTING) {
+      conn.close();
+    }
+    delete wsPool[sid];
+  }
+  delete pendingPool[sid];
+}
+
+function closeAllWebSockets() {
+  for (const sid of Object.keys(wsPool)) closeWebSocket(sid);
+}
 
 async function ensureSession() {
   if (!currentSession) {
@@ -180,45 +209,79 @@ async function ensureSession() {
     currentSession = d.session_id;
     await refreshSessions();
   }
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(`${proto}//${location.host}/ws/${currentSession}`);
-    ws.onmessage = (e) => handleWsMessage(JSON.parse(e.data));
-    ws.onerror = () => appendMsg('system', 'WebSocket error');
-    ws.onclose = () => { ws = null; };
-    await new Promise(r => { ws.onopen = r; });
+  const sid = currentSession;
+  const existing = getConn(sid);
+  if (existing && existing.readyState === WebSocket.OPEN) return;
+
+  // Clean up broken connection if any
+  if (existing) closeWebSocket(sid);
+
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const conn = new WebSocket(`${proto}//${location.host}/ws/${sid}`);
+  wsPool[sid] = conn;
+  if (!pendingPool[sid]) pendingPool[sid] = {};
+
+  conn.onmessage = (e) => {
+    // Only render if this session is currently active
+    if (currentSession === sid) {
+      handleWsMessage(sid, JSON.parse(e.data));
+    } else {
+      // Buffer silently — message is persisted on server via session.add_message
+      bufferWsMessage(sid, JSON.parse(e.data));
+    }
+  };
+  conn.onerror = () => {
+    if (currentSession === sid) appendMsg('system', 'WebSocket error');
+  };
+  conn.onclose = () => {
+    delete wsPool[sid];
+  };
+  await new Promise(r => { conn.onopen = r; });
+}
+
+function bufferWsMessage(sid, msg) {
+  // For background sessions: just track pending state so nothing leaks
+  const id = msg.msg_id;
+  if (!id) return;
+  const pending = getPending(sid);
+  if (msg.type === 'stream') {
+    if (!pending[id]) pending[id] = { content: '' };
+    pending[id].content += msg.content;
+  } else if (msg.type === 'done' || msg.type === 'error') {
+    delete pending[id];
   }
 }
 
-function handleWsMessage(msg) {
+function handleWsMessage(sid, msg) {
   const id = msg.msg_id;
   if (!id) return;
+  const pending = getPending(sid);
 
   if (msg.type === 'thinking') {
-    pendingMsgs[id] = { elId: appendMsg('assistant', '<div class="loading"></div> thinking...'), content: '' };
+    pending[id] = { elId: appendMsg('assistant', '<div class="loading"></div> thinking...'), content: '' };
   } else if (msg.type === 'stream') {
-    if (!pendingMsgs[id]) pendingMsgs[id] = { elId: appendMsg('assistant', ''), content: '' };
-    pendingMsgs[id].content += msg.content;
-    const el = document.getElementById(pendingMsgs[id].elId);
-    if (el) el.querySelector('.content').textContent = pendingMsgs[id].content;
+    if (!pending[id]) pending[id] = { elId: appendMsg('assistant', ''), content: '' };
+    pending[id].content += msg.content;
+    const el = document.getElementById(pending[id].elId);
+    if (el) el.querySelector('.content').textContent = pending[id].content;
     scrollBottom();
   } else if (msg.type === 'tool_call') {
     appendMsg('system', `🔧 ${msg.name}(${JSON.stringify(msg.input).slice(0,60)}) → ${(msg.result||'').slice(0,100)}`);
   } else if (msg.type === 'done') {
-    if (pendingMsgs[id]) {
-      const el = document.getElementById(pendingMsgs[id].elId);
+    if (pending[id]) {
+      const el = document.getElementById(pending[id].elId);
       if (el) el.querySelector('.content').textContent = msg.content;
-      delete pendingMsgs[id];
+      delete pending[id];
     } else {
       appendMsg('assistant', msg.content);
     }
     refreshKernel();
     refreshSessions();
   } else if (msg.type === 'error') {
-    if (pendingMsgs[id]) {
-      const el = document.getElementById(pendingMsgs[id].elId);
+    if (pending[id]) {
+      const el = document.getElementById(pending[id].elId);
       if (el) el.querySelector('.content').textContent = '❌ ' + msg.content;
-      delete pendingMsgs[id];
+      delete pending[id];
     } else {
       appendMsg('system', '❌ ' + msg.content);
     }
@@ -232,13 +295,19 @@ function scrollBottom() {
 
 async function sendMessage() {
   await ensureSession();
+  const sid = currentSession;
+  const conn = getConn(sid);
+  if (!conn || conn.readyState !== WebSocket.OPEN) {
+    appendMsg('system', 'Connection lost. Please try again.');
+    return;
+  }
   const input = document.getElementById('promptInput');
   const prompt = input.value.trim();
   if (!prompt) return;
   input.value = '';
   input.focus();
   appendMsg('user', prompt);
-  ws.send(JSON.stringify({ prompt, mode: 'agent' }));
+  conn.send(JSON.stringify({ prompt, mode: 'agent' }));
 }
 
 function appendMsg(role, content) {

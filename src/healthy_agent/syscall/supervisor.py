@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine, TYPE_CHECKING
 
@@ -37,8 +38,10 @@ async def supervised_fork(
     max_retries: int = 3,
     judge: Callable[..., Coroutine] | None = None,
     on_retry: Callable | None = None,
+    backoff_base: float = 0.5,
+    backoff_max: float = 30.0,
 ) -> SupervisedResult:
-    """Fork a child process with automatic retry and error correction.
+    """Fork a child process with automatic retry, error correction, and exponential backoff.
 
     Like a supervisor that restarts crashed processes, but smarter —
     it feeds error context back into the next attempt.
@@ -53,6 +56,8 @@ async def supervised_fork(
         judge: Optional async function(result, payload) -> (passed: bool, feedback: str)
                If None, any non-Exception result is considered success.
         on_retry: Optional callback(attempt) called before each retry
+        backoff_base: Base delay in seconds for exponential backoff (0 to disable)
+        backoff_max: Maximum backoff delay in seconds
     """
     attempts: list[Attempt] = []
     current_payload = dict(payload)
@@ -91,6 +96,11 @@ async def supervised_fork(
 
         if on_retry:
             on_retry(attempt)
+
+        # Exponential backoff before next attempt
+        if round_num < max_retries and backoff_base > 0:
+            delay = min(backoff_base * (2 ** (round_num - 1)), backoff_max)
+            await asyncio.sleep(delay)
 
     return SupervisedResult(
         success=False, result=attempts[-1].result if attempts else None,

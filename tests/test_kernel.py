@@ -155,3 +155,97 @@ async def test_shell_driver_failure():
     drv = ShellDriver()
     result = await drv.invoke("exec", {"command": "false"})
     assert not result.success
+
+
+# --- IPC: message history ---
+
+async def test_channel_history():
+    ch = Channel("test", history_size=5)
+    await ch.send(Message(sender_pid=1, data="msg1"))
+    await ch.send(Message(sender_pid=2, data="msg2"))
+    await ch.send(Message(sender_pid=3, data="msg3"))
+
+    history = ch.get_history()
+    assert len(history) == 3
+    assert history[0].data == "msg1"
+
+    recent = ch.get_history(last_n=2)
+    assert len(recent) == 2
+    assert recent[0].data == "msg2"
+
+
+async def test_channel_no_history():
+    ch = Channel("test")  # history_size=0 by default
+    await ch.send(Message(sender_pid=1, data="msg1"))
+    assert ch.get_history() == []
+
+
+# --- IPC: BroadcastChannel ---
+
+async def test_broadcast_channel():
+    from healthy_agent.ipc import BroadcastChannel
+    broadcast = BroadcastChannel("events")
+    sub1 = broadcast.subscribe("agent_1")
+    sub2 = broadcast.subscribe("agent_2")
+
+    delivered = await broadcast.publish(Message(sender_pid=0, data="hello"))
+    assert delivered == 2
+    assert broadcast.subscriber_count == 2
+
+    msg1 = await sub1.recv(timeout=1.0)
+    msg2 = await sub2.recv(timeout=1.0)
+    assert msg1 is not None and msg1.data == "hello"
+    assert msg2 is not None and msg2.data == "hello"
+
+
+async def test_broadcast_unsubscribe():
+    from healthy_agent.ipc import BroadcastChannel
+    broadcast = BroadcastChannel("events")
+    sub1 = broadcast.subscribe("a")
+    sub2 = broadcast.subscribe("b")
+
+    sub1.unsubscribe()
+    assert broadcast.subscriber_count == 1
+
+    delivered = await broadcast.publish(Message(sender_pid=0, data="test"))
+    assert delivered == 1
+
+    msg = await sub2.recv(timeout=1.0)
+    assert msg is not None and msg.data == "test"
+
+
+# --- IPC: TopicRouter ---
+
+async def test_topic_router():
+    from healthy_agent.ipc import TopicRouter
+    errors_ch = Channel("errors")
+    metrics_ch = Channel("metrics")
+
+    router = TopicRouter()
+    router.register("errors", errors_ch)
+    router.register("metrics", metrics_ch)
+
+    assert sorted(router.topics) == ["errors", "metrics"]
+
+    routed = await router.route(Message(sender_pid=1, data="oops", topic="errors"))
+    assert routed is True
+    msg = await errors_ch.recv(timeout=1.0)
+    assert msg is not None and msg.data == "oops"
+
+    routed = await router.route(Message(sender_pid=1, data="cpu=50", topic="metrics"))
+    assert routed is True
+
+    routed = await router.route(Message(sender_pid=1, data="lost", topic="unknown"))
+    assert routed is False
+
+
+async def test_topic_router_default():
+    from healthy_agent.ipc import TopicRouter
+    default_ch = Channel("default")
+    router = TopicRouter()
+    router.set_default(default_ch)
+
+    routed = await router.route(Message(sender_pid=1, data="catch_all", topic="anything"))
+    assert routed is True
+    msg = await default_ch.recv(timeout=1.0)
+    assert msg is not None and msg.data == "catch_all"

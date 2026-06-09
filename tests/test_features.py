@@ -260,3 +260,135 @@ async def test_custom_skill():
     reg.register(UpperSkill())
     result = await reg.invoke("upper", {"text": "hello"}, None, None)
     assert result.data == "HELLO"
+
+
+# --- MCP: resources ---
+
+async def test_mcp_resources_roundtrip():
+    server = McpServer()
+
+    async def config_provider():
+        return '{"theme": "dark"}'
+
+    server.register_resource(
+        uri="config://app/theme",
+        name="App Theme",
+        description="Application theme configuration",
+        mime_type="application/json",
+        provider=config_provider,
+    )
+
+    # List resources
+    result = await server.handle_message({
+        "jsonrpc": "2.0", "method": "resources/list", "params": {}, "id": 10,
+    })
+    resources = json.loads(result)["result"]["resources"]
+    assert len(resources) == 1
+    assert resources[0]["name"] == "App Theme"
+    assert resources[0]["uri"] == "config://app/theme"
+
+    # Read resource
+    result = await server.handle_message({
+        "jsonrpc": "2.0", "method": "resources/read",
+        "params": {"uri": "config://app/theme"}, "id": 11,
+    })
+    contents = json.loads(result)["result"]["contents"]
+    assert len(contents) == 1
+    assert contents[0]["mimeType"] == "application/json"
+    assert '"dark"' in contents[0]["text"]
+
+
+async def test_mcp_resources_static():
+    server = McpServer()
+    server.register_resource(
+        uri="file:///readme",
+        name="README",
+        static_content="Hello from README",
+    )
+
+    result = await server.handle_message({
+        "jsonrpc": "2.0", "method": "resources/read",
+        "params": {"uri": "file:///readme"}, "id": 12,
+    })
+    text = json.loads(result)["result"]["contents"][0]["text"]
+    assert text == "Hello from README"
+
+
+async def test_mcp_resources_not_found():
+    server = McpServer()
+    result = await server.handle_message({
+        "jsonrpc": "2.0", "method": "resources/read",
+        "params": {"uri": "nonexistent://x"}, "id": 13,
+    })
+    data = json.loads(result)
+    assert "error" in data
+
+
+# --- MCP: prompts ---
+
+async def test_mcp_prompts_template():
+    server = McpServer()
+    server.register_prompt(
+        name="summarize",
+        description="Summarize a topic",
+        arguments=[{"name": "topic", "description": "Topic to summarize", "required": True}],
+        template="Please summarize the following topic: {topic}",
+    )
+
+    # List prompts
+    result = await server.handle_message({
+        "jsonrpc": "2.0", "method": "prompts/list", "params": {}, "id": 20,
+    })
+    prompts = json.loads(result)["result"]["prompts"]
+    assert len(prompts) == 1
+    assert prompts[0]["name"] == "summarize"
+
+    # Get prompt with arguments
+    result = await server.handle_message({
+        "jsonrpc": "2.0", "method": "prompts/get",
+        "params": {"name": "summarize", "arguments": {"topic": "AI safety"}}, "id": 21,
+    })
+    data = json.loads(result)["result"]
+    assert "AI safety" in data["messages"][0]["content"]["text"]
+
+
+async def test_mcp_prompts_handler():
+    server = McpServer()
+
+    async def custom_prompt_handler(arguments):
+        lang = arguments.get("language", "en")
+        return [{"role": "user", "content": {"type": "text", "text": f"Translate to {lang}"}}]
+
+    server.register_prompt(
+        name="translate",
+        description="Translate text",
+        handler=custom_prompt_handler,
+    )
+
+    result = await server.handle_message({
+        "jsonrpc": "2.0", "method": "prompts/get",
+        "params": {"name": "translate", "arguments": {"language": "Japanese"}}, "id": 22,
+    })
+    messages = json.loads(result)["result"]["messages"]
+    assert "Japanese" in messages[0]["content"]["text"]
+
+
+async def test_mcp_prompts_not_found():
+    server = McpServer()
+    result = await server.handle_message({
+        "jsonrpc": "2.0", "method": "prompts/get",
+        "params": {"name": "nonexistent"}, "id": 23,
+    })
+    data = json.loads(result)
+    assert "error" in data
+
+
+async def test_mcp_initialize_capabilities():
+    server = McpServer()
+    result = await server.handle_message({
+        "jsonrpc": "2.0", "method": "initialize", "params": {}, "id": 30,
+    })
+    caps = json.loads(result)["result"]["capabilities"]
+    assert "tools" in caps
+    assert "resources" in caps
+    assert "prompts" in caps

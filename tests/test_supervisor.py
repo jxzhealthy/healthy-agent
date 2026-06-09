@@ -124,3 +124,87 @@ async def test_on_retry_callback():
     result = await k.exec(pid)
     assert result.success
     assert retries == [1]
+
+
+# --- Exponential backoff ---
+
+async def test_backoff_delays_retries():
+    """Verify that backoff actually introduces delay between retries."""
+    import time
+    timestamps = []
+
+    async def handler(process, kernel):
+        timestamps.append(time.monotonic())
+        if len(timestamps) < 3:
+            raise ValueError("fail")
+        return "ok"
+
+    async def parent(process, kernel):
+        return await supervised_fork(
+            kernel, process, "backoff", {}, handler,
+            max_retries=3, backoff_base=0.1, backoff_max=5.0,
+        )
+
+    k = Kernel(num_cores=2)
+    pid = k.spawn("parent", {}, handler=parent, preemptible=False)
+    result = await k.exec(pid)
+    assert result.success
+    assert len(timestamps) == 3
+    # First retry delay should be ~0.1s (backoff_base * 2^0)
+    gap1 = timestamps[1] - timestamps[0]
+    assert gap1 >= 0.08  # allow small timing variance
+    # Second retry delay should be ~0.2s (backoff_base * 2^1)
+    gap2 = timestamps[2] - timestamps[1]
+    assert gap2 >= 0.15
+
+
+async def test_backoff_disabled():
+    """With backoff_base=0, retries should happen immediately."""
+    import time
+    timestamps = []
+
+    async def handler(process, kernel):
+        timestamps.append(time.monotonic())
+        if len(timestamps) < 3:
+            raise ValueError("fail")
+        return "ok"
+
+    async def parent(process, kernel):
+        return await supervised_fork(
+            kernel, process, "no_backoff", {}, handler,
+            max_retries=3, backoff_base=0,
+        )
+
+    k = Kernel(num_cores=2)
+    pid = k.spawn("parent", {}, handler=parent, preemptible=False)
+    result = await k.exec(pid)
+    assert result.success
+    assert len(timestamps) == 3
+    total_time = timestamps[-1] - timestamps[0]
+    assert total_time < 0.5  # Should be very fast without backoff
+
+
+async def test_backoff_max_cap():
+    """Verify backoff delay is capped at backoff_max."""
+    import time
+    timestamps = []
+
+    async def handler(process, kernel):
+        timestamps.append(time.monotonic())
+        if len(timestamps) < 3:
+            raise ValueError("fail")
+        return "ok"
+
+    async def parent(process, kernel):
+        return await supervised_fork(
+            kernel, process, "capped", {}, handler,
+            max_retries=3, backoff_base=10.0, backoff_max=0.1,
+        )
+
+    k = Kernel(num_cores=2)
+    pid = k.spawn("parent", {}, handler=parent, preemptible=False)
+    result = await k.exec(pid)
+    assert result.success
+    # Despite large backoff_base, max caps it at 0.1s
+    total_time = timestamps[-1] - timestamps[0]
+    assert total_time < 1.0
