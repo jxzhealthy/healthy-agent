@@ -305,14 +305,14 @@ async def main():
     for log in result["logs"]:
         print(f"  {log}")
 
-    print(f"\n--- Sessions ---")
+    print("\n--- Sessions ---")
     for s in result["sessions"]:
         print(f"  {s['session_id']}: {s['messages']} msgs, active={s['active']}, meta={s['metadata']}")
 
-    print(f"\n--- Long-term Memory ---")
+    print("\n--- Long-term Memory ---")
     print(f"  {memory.long.all()}")
 
-    print(f"\n--- MCP Server ---")
+    print("\n--- MCP Server ---")
     init = await mcp.handle_message({"jsonrpc": "2.0", "method": "initialize", "params": {}, "id": 1})
     tools = await mcp.handle_message({"jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": 2})
     print(f"  Server: {json.loads(init)['result']['serverInfo']['name']}")
@@ -324,10 +324,10 @@ async def main():
     })
     print(f"  MCP call calculate(7*8) = {json.loads(json.loads(calc)['result']['content'][0]['text'])}")
 
-    print(f"\n--- Kernel ---")
+    print("\n--- Kernel ---")
     ps = kernel.ps()
     print(f"  Total processes: {len(ps)}")
-    print(f"  Process tree:")
+    print("  Process tree:")
     for row in ps:
         indent = "    " if row["parent"] else "  "
         print(f"  {indent}pid={row['pid']} type={row['type']} state={row['state']} cpu={row['cpu_time']}s parent={row['parent']}")

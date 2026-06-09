@@ -214,7 +214,7 @@ async def main():
 
     print("=" * 60)
     print(f"  Research Agent — Topic: {topic}")
-    print(f"  Kernel: 4 cores, MLFQ scheduler")
+    print("  Kernel: 4 cores, MLFQ scheduler")
     print("=" * 60)
 
     kernel = Kernel(num_cores=4)
@@ -240,27 +240,27 @@ async def main():
     print(f"  Fact check: {result['fact_check']}")
     print(f"  IPC messages received: {result['progress_messages']}")
 
-    print(f"\n  --- Summary ---")
+    print("\n  --- Summary ---")
     print(f"  {result['summary']}")
 
-    print(f"\n  --- Process Table ---")
+    print("\n  --- Process Table ---")
     print(f"  {'PID':<5} {'Type':<20} {'State':<12} {'Priority':<9} {'CPU(s)':<10} {'Parent'}")
     print(f"  {'-'*70}")
     for row in kernel.ps():
         print(f"  {row['pid']:<5} {row['type']:<20} {row['state']:<12} {row['priority']:<9} {row['cpu_time']:<10} {row['parent']}")
 
-    print(f"\n  --- Scheduler Stats ---")
+    print("\n  --- Scheduler Stats ---")
     stats = kernel.scheduler.stats()
     print(f"  Total scheduled: {stats.total_scheduled}")
     print(f"  Total preempted: {stats.total_preempted}")
     print(f"  Total boosted:   {stats.total_boosted}")
 
-    print(f"\n  --- Timing ---")
+    print("\n  --- Timing ---")
     print(f"  Total wall time: {total:.2f}s")
 
     # Show scheduling event timeline
     if events_log:
-        print(f"\n  --- Scheduling Events (first 15) ---")
+        print("\n  --- Scheduling Events (first 15) ---")
         t_base = events_log[0][0]
         for t, etype, pid, ttype in events_log[:15]:
             print(f"  +{t - t_base:.3f}s  [{etype}] pid={pid} ({ttype})")

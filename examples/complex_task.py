@@ -25,7 +25,6 @@ from healthy_agent.kernel.runtime import Kernel
 from healthy_agent.syscall import fork, wait, io, supervised_fork
 from healthy_agent.drivers.anthropic import AnthropicDriver
 from healthy_agent.drivers.tool_builtin import ShellDriver
-from healthy_agent.memory import MemoryManager
 from healthy_agent.session import SessionManager
 from healthy_agent.ipc import Channel, Message
 
@@ -54,7 +53,7 @@ def strip_md(text):
 
 async def coordinator(process, kernel):
     session = process.payload["session"]
-    memory = process.payload["memory"]
+    process.payload["memory"]
     topic = process.payload["topic"]
     task_desc = process.payload["task_desc"]
 
@@ -209,7 +208,7 @@ async def main():
     print("=" * 60)
     print(f"  Complex Task: {topic}")
     print(f"  Kernel: 4 cores | LLM: {driver.name}")
-    print(f"  Test cases: 8 strict assertions")
+    print("  Test cases: 8 strict assertions")
     print("=" * 60)
 
     kernel = Kernel(num_cores=4)
@@ -226,10 +225,10 @@ async def main():
     elapsed = time.monotonic() - t0
 
     # Output
-    print(f"\n--- Summary ---")
+    print("\n--- Summary ---")
     print(f"  {result['summary']}")
 
-    print(f"\n--- Code Gen Attempts ---")
+    print("\n--- Code Gen Attempts ---")
     for a in result["attempts"]:
         status = "PASS" if a["success"] else "FAIL"
         detail = a["feedback"] or a["error"] or ""
@@ -242,31 +241,31 @@ async def main():
     else:
         print("  [FAILED after all retries]")
 
-    print(f"\n--- Session ---")
+    print("\n--- Session ---")
     si = result["session"]
     print(f"  ID: {si['session_id']}")
     print(f"  Messages: {si['messages']}, Short memory: {si['memory_short']}, Backend: {si['memory_backend']}")
 
-    print(f"\n--- Long-term Memory ---")
+    print("\n--- Long-term Memory ---")
     for k, v in result["long_term_memory"].items():
         preview = str(v)[:80]
         print(f"  {k}: {preview}...")
 
-    print(f"\n--- Process Table ---")
+    print("\n--- Process Table ---")
     for row in kernel.ps():
         indent = "    " if row["parent"] else "  "
         print(f"  {indent}pid={row['pid']} type={row['type']} state={row['state']} cpu={row['cpu_time']:.2f}s")
 
-    print(f"\n--- Scheduler ---")
+    print("\n--- Scheduler ---")
     stats = kernel.scheduler.stats()
     print(f"  Scheduled: {stats.total_scheduled}, Preempted: {stats.total_preempted}")
 
-    print(f"\n--- Timing ---")
+    print("\n--- Timing ---")
     print(f"  Wall time: {elapsed:.1f}s")
 
-    print(f"\n--- Logs ---")
-    for l in result["logs"]:
-        print(f"  {l}")
+    print("\n--- Logs ---")
+    for entry in result["logs"]:
+        print(f"  {entry}")
 
     print(f"\n{'=' * 60}")
     print(f"  {'SUCCESS' if result['code_success'] else 'FAILED'}")
