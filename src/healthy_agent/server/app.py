@@ -59,6 +59,9 @@ def create_app(
         version="0.1.0",
     )
 
+    from .web import router as web_router
+    app.include_router(web_router)
+
     kernel = Kernel(num_cores=num_cores)
     sessions = SessionManager()
     skills = SkillRegistry()
