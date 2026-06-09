@@ -339,6 +339,8 @@ def create_app(
                         for t in matched_tools
                     )
 
+                await websocket.send_json({"type": "thinking"})
+
                 if use_agent:
                     from healthy_agent.agent import AgentLoop
                     agent = AgentLoop(driver, skills, system_prompt=system_prompt, max_rounds=5)
@@ -357,7 +359,6 @@ def create_app(
                     result = await agent.run(prompt, on_step=on_step)
                     text = result.answer
                 else:
-                    await websocket.send_json({"type": "thinking"})
                     try:
                         chunks = []
                         async for chunk in driver.stream(
