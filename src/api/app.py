@@ -175,16 +175,30 @@ def create_app(
         )
 
         async def _wait_result():
-            event = kernel._get_event(pid)
-            await event.wait()
-            result = kernel.process_table[pid].pcb.result
-            task_results[task_id] = {
-                "status": "completed",
-                "result": result if not isinstance(result, Exception) else str(result),
-                "pid": pid,
-                "cpu_time": kernel.process_table[pid].pcb.cpu_time,
-                "session_id": session_id,
-            }
+            try:
+                event = kernel._get_event(pid)
+                await event.wait()
+                process = kernel.process_table.get(pid)
+                if process:
+                    result = process.pcb.result
+                    cpu_time = process.pcb.cpu_time
+                else:
+                    result = "Process completed (reaped)"
+                    cpu_time = 0
+                task_results[task_id] = {
+                    "status": "completed",
+                    "result": result if not isinstance(result, Exception) else str(result),
+                    "pid": pid,
+                    "cpu_time": cpu_time,
+                    "session_id": session_id,
+                }
+            except Exception as e:
+                task_results[task_id] = {
+                    "status": "failed",
+                    "result": str(e),
+                    "pid": pid,
+                    "session_id": session_id,
+                }
 
         asyncio.create_task(_wait_result())
         return {"task_id": task_id, "pid": pid, "status": "submitted"}
