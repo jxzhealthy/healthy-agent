@@ -4,6 +4,7 @@ from healthy_agent.kernel.runtime import Kernel
 from healthy_agent.skill import SkillRegistry
 from healthy_agent.skill.base import Skill, SkillParam, SkillResult
 from healthy_agent.drivers.base import LLMDriver, IOResult
+from healthy_agent.agent.reflexion import ReflexionAgent, Evaluation, Reflection, _parse_reflection, _build_reflection_context
 
 
 # --- Mock driver ---
@@ -222,7 +223,8 @@ def test_chunk_text_overlap():
 # --- RAG: persistence ---
 
 def test_vector_store_persist():
-    import tempfile, os
+    import tempfile
+    import os
     path = os.path.join(tempfile.mkdtemp(), "store.json")
     store1 = SimpleVectorStore(persist_path=path)
     store1.add_text("hello world", {"source": "test"})
@@ -353,3 +355,111 @@ async def test_multi_agent_debate_consensus():
     result = await k.exec(pid)
     assert result.get("consensus") == "consensus_answer"
     assert result.get("consensus_round") == 0  # First round all agree
+
+
+# --- Reflexion ---
+
+
+def test_parse_reflection():
+    text = """WHAT_WENT_WRONG: I forgot to handle edge cases
+WHAT_TO_DO_DIFFERENTLY: Add boundary checks first
+KEY_INSIGHT: Always validate inputs before processing"""
+    ref = _parse_reflection(text, trial=1)
+    assert ref.trial == 1
+    assert "edge cases" in ref.what_went_wrong
+    assert "boundary" in ref.what_to_do_differently
+    assert "validate" in ref.key_insight
+
+
+def test_parse_reflection_missing_fields():
+    ref = _parse_reflection("some garbage text", trial=2)
+    assert ref.trial == 2
+    assert ref.what_went_wrong
+    assert ref.what_to_do_differently
+
+
+def test_build_reflection_context_empty():
+    assert _build_reflection_context([]) == ""
+
+
+def test_build_reflection_context():
+    refs = [
+        Reflection(trial=1, what_went_wrong="wrong1", what_to_do_differently="fix1", key_insight="learn1"),
+        Reflection(trial=2, what_went_wrong="wrong2", what_to_do_differently="fix2", key_insight="learn2"),
+    ]
+    ctx = _build_reflection_context(refs)
+    assert "Attempt 1" in ctx
+    assert "Attempt 2" in ctx
+    assert "wrong1" in ctx
+    assert "fix2" in ctx
+
+
+async def test_reflexion_success_first_try():
+    driver = MockDriver([
+        {"text": "The answer is 42.", "tool_calls": [], "stop_reason": "end_turn"},
+    ])
+    skills = SkillRegistry()
+
+    async def always_pass(prompt, answer):
+        return Evaluation(success=True, score=1.0, feedback="Perfect")
+
+    agent = ReflexionAgent(driver, skills, evaluator=always_pass, max_trials=3)
+    result = await agent.run("What is the meaning of life?")
+    assert result.success
+    assert result.total_trials == 1
+    assert len(result.reflections) == 0
+    assert "42" in result.answer
+
+
+async def test_reflexion_succeeds_after_reflection():
+    class ImprovingDriver(LLMDriver):
+        @property
+        def name(self): return "improving"
+
+        async def generate(self, messages, **kwargs):
+            has_reflection = any(
+                "Lessons from previous attempts" in str(m.get("content", ""))
+                for m in messages
+            )
+            if any("WHAT_WENT_WRONG" in str(m.get("content", "")) for m in messages):
+                text = "WHAT_WENT_WRONG: Did not sort\nWHAT_TO_DO_DIFFERENTLY: Use sorted()\nKEY_INSIGHT: Don't return input unchanged"
+            elif has_reflection:
+                text = "def sort(lst): return sorted(lst)"
+            else:
+                text = "def sort(lst): return lst"
+            return IOResult(success=True, data={"text": text, "tool_calls": [], "stop_reason": "end_turn"}, tokens_used=10)
+
+        async def stream(self, messages, **kwargs):
+            yield "mock"
+
+    async def eval_sort(prompt, answer):
+        if "sorted" in answer:
+            return Evaluation(success=True, score=1.0, feedback="Correct")
+        return Evaluation(success=False, score=0.2, feedback="Does not sort")
+
+    agent = ReflexionAgent(ImprovingDriver(), SkillRegistry(), evaluator=eval_sort, max_trials=3)
+    result = await agent.run("Write a sort function")
+    assert result.success
+    assert result.total_trials == 2
+    assert len(result.reflections) == 1
+
+
+async def test_reflexion_all_trials_fail():
+    driver = MockDriver([
+        {"text": "bad 1", "tool_calls": [], "stop_reason": "end_turn"},
+        {"text": "WHAT_WENT_WRONG: w\nWHAT_TO_DO_DIFFERENTLY: f\nKEY_INSIGHT: l", "tool_calls": [], "stop_reason": "end_turn"},
+        {"text": "bad 2", "tool_calls": [], "stop_reason": "end_turn"},
+        {"text": "WHAT_WENT_WRONG: w2\nWHAT_TO_DO_DIFFERENTLY: f2\nKEY_INSIGHT: l2", "tool_calls": [], "stop_reason": "end_turn"},
+        {"text": "bad 3", "tool_calls": [], "stop_reason": "end_turn"},
+    ])
+    scores = iter([0.2, 0.5, 0.4])
+
+    async def strict_eval(prompt, answer):
+        return Evaluation(success=False, score=next(scores), feedback="nope")
+
+    agent = ReflexionAgent(driver, SkillRegistry(), evaluator=strict_eval, max_trials=3)
+    result = await agent.run("Hard task")
+    assert not result.success
+    assert result.total_trials == 3
+    assert len(result.reflections) == 2
+    assert "bad 2" in result.answer  # Best score was 0.5
