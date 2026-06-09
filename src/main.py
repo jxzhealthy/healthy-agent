@@ -20,7 +20,7 @@ def main():
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", "-p", type=int, default=8000)
     parser.add_argument("--cores", "-c", type=int, default=4)
-    parser.add_argument("--driver", "-d", default="mock", choices=["mock", "anthropic", "openai", "deepseek", "zhipu", "ollama"])
+    parser.add_argument("--driver", "-d", default="mock", choices=["mock", "anthropic", "openai", "deepseek", "zhipu", "qwen", "ollama"])
     parser.add_argument("--model", "-m", default=None)
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()

@@ -81,6 +81,9 @@ def create_app(
         elif driver_name == "zhipu":
             from ..drivers.openai_compat import ZhipuDriver
             driver = ZhipuDriver(model=model or "glm-4")
+        elif driver_name == "qwen":
+            from ..drivers.openai_compat import QwenDriver
+            driver = QwenDriver(model=model or "qwen-plus")
         elif driver_name == "ollama":
             from ..drivers.openai_compat import OllamaDriver
             driver = OllamaDriver(model=model or "llama3")

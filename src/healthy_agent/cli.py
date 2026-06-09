@@ -21,6 +21,9 @@ def _make_driver(name: str):
     if name == "zhipu":
         from .drivers.openai_compat import ZhipuDriver
         return ZhipuDriver()
+    if name == "qwen":
+        from .drivers.openai_compat import QwenDriver
+        return QwenDriver()
     if name == "ollama":
         from .drivers.openai_compat import OllamaDriver
         return OllamaDriver()
@@ -36,7 +39,7 @@ def main():
 @main.command()
 @click.argument("task")
 @click.option("--cores", "-c", default=4, help="Number of cores (concurrent capacity)")
-@click.option("--driver", "-d", default="mock", help="LLM driver: mock, anthropic, openai, deepseek, zhipu, ollama")
+@click.option("--driver", "-d", default="mock", help="LLM driver: mock, anthropic, openai, deepseek, zhipu, qwen, ollama")
 @click.option("--verbose", "-v", is_flag=True, help="Show scheduling events")
 def run(task: str, cores: int, driver: str, verbose: bool):
     """Submit a task and run until completion."""

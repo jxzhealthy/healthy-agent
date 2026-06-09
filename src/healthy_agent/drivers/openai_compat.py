@@ -156,6 +156,22 @@ class OpenAIDriver(OpenAICompatDriver):
         return f"openai:{self.model}"
 
 
+class QwenDriver(OpenAICompatDriver):
+    """Qwen (Tongyi Qianwen) via DashScope API."""
+
+    def __init__(self, *, model: str = "qwen-plus", api_key: str | None = None, **kwargs):
+        super().__init__(
+            model=model,
+            api_key=api_key or os.environ.get("DASHSCOPE_API_KEY", ""),
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            **kwargs,
+        )
+
+    @property
+    def name(self) -> str:
+        return f"qwen:{self.model}"
+
+
 class OllamaDriver(OpenAICompatDriver):
     """Ollama local model driver."""
 
