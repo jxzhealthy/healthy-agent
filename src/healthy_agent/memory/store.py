@@ -125,7 +125,7 @@ class LongTermMemory:
 
 
 class MemoryManager:
-    """Unified interface — short-term (RAM) + long-term (disk or Redis)."""
+    """Unified interface — short-term (RAM) + long-term (disk, Redis, or Mem0)."""
 
     def __init__(
         self,
@@ -133,12 +133,23 @@ class MemoryManager:
         short_term_ttl: float = 300.0,
         long_term_path: str | Path = "~/.healthy_agent/memory.json",
         redis_url: str | None = None,
+        backend: str = "local",
+        mem0_config: dict | None = None,
+        mem0_user_id: str = "default",
     ):
         self.short = ShortTermMemory(default_ttl=short_term_ttl)
-        self._redis_backend = None
-        if redis_url:
+        self._async_backend = None
+        self._backend_name = backend
+
+        if backend == "redis" or redis_url:
             from .backend import RedisMemoryBackend
-            self._redis_backend = RedisMemoryBackend(redis_url)
+            self._async_backend = RedisMemoryBackend(redis_url or "redis://localhost:6379")
+            self._backend_name = "redis"
+        elif backend == "mem0":
+            from .backend import Mem0Backend
+            self._async_backend = Mem0Backend(user_id=mem0_user_id, config=mem0_config)
+            self._backend_name = "mem0"
+
         self.long = LongTermMemory(path=long_term_path)
 
     def remember(self, key: str, value: Any, *, persist: bool = False, tags: list[str] | None = None) -> None:
@@ -148,8 +159,8 @@ class MemoryManager:
 
     async def remember_async(self, key: str, value: Any, *, persist: bool = False, ttl: int | None = None, tags: list[str] | None = None) -> None:
         self.short.put(key, value, tags=tags)
-        if persist and self._redis_backend:
-            await self._redis_backend.put(key, value, ttl=ttl, tags=tags)
+        if persist and self._async_backend:
+            await self._async_backend.put(key, value, ttl=ttl, tags=tags)
         elif persist:
             self.long.put(key, value, tags=tags)
 
@@ -163,8 +174,8 @@ class MemoryManager:
         value = self.short.get(key)
         if value is not None:
             return value
-        if self._redis_backend:
-            return await self._redis_backend.get(key)
+        if self._async_backend:
+            return await self._async_backend.get(key)
         return self.long.get(key)
 
     def forget(self, key: str, *, persistent: bool = False) -> None:
@@ -174,11 +185,15 @@ class MemoryManager:
 
     async def forget_async(self, key: str, *, persistent: bool = False) -> None:
         self.short.delete(key)
-        if persistent and self._redis_backend:
-            await self._redis_backend.delete(key)
+        if persistent and self._async_backend:
+            await self._async_backend.delete(key)
         elif persistent:
             self.long.delete(key)
 
     @property
+    def backend_name(self) -> str:
+        return self._backend_name
+
+    @property
     def distributed(self) -> bool:
-        return self._redis_backend is not None
+        return self._async_backend is not None

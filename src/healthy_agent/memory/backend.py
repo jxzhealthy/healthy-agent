@@ -125,3 +125,61 @@ class RedisMemoryBackend(MemoryBackend):
 
     async def close(self) -> None:
         await self._client.aclose()
+
+
+class Mem0Backend(MemoryBackend):
+    """Mem0-backed memory — vector search, auto-extraction, user-scoped.
+
+    Requires: pip install mem0ai
+    """
+
+    def __init__(self, *, user_id: str = "default", config: dict | None = None):
+        try:
+            from mem0 import Memory
+        except ImportError:
+            raise ImportError("mem0ai is required: pip install mem0ai")
+        self._mem = Memory.from_config(config) if config else Memory()
+        self._user_id = user_id
+
+    async def put(self, key: str, value: Any, *, ttl: int | None = None, tags: list[str] | None = None) -> None:
+        text = value if isinstance(value, str) else json.dumps(value)
+        metadata = {"key": key}
+        if tags:
+            metadata["tags"] = ",".join(tags)
+        self._mem.add(text, user_id=self._user_id, metadata=metadata)
+
+    async def get(self, key: str) -> Any | None:
+        results = self._mem.search(key, user_id=self._user_id, limit=1)
+        if not results or not results.get("results"):
+            return None
+        top = results["results"][0]
+        return top.get("memory", top.get("text"))
+
+    async def delete(self, key: str) -> None:
+        results = self._mem.search(key, user_id=self._user_id, limit=5)
+        for item in results.get("results", []):
+            mid = item.get("id")
+            if mid:
+                self._mem.delete(mid)
+
+    async def search(self, tag: str) -> list[dict]:
+        results = self._mem.search(tag, user_id=self._user_id, limit=20)
+        return [
+            {"key": r.get("metadata", {}).get("key", ""), "value": r.get("memory", r.get("text", ""))}
+            for r in results.get("results", [])
+        ]
+
+    async def all(self) -> dict[str, Any]:
+        results = self._mem.get_all(user_id=self._user_id)
+        out = {}
+        for r in results.get("results", []):
+            key = r.get("metadata", {}).get("key", r.get("id", ""))
+            out[key] = r.get("memory", r.get("text", ""))
+        return out
+
+    async def clear(self) -> None:
+        self._mem.delete_all(user_id=self._user_id)
+
+    async def size(self) -> int:
+        results = self._mem.get_all(user_id=self._user_id)
+        return len(results.get("results", []))

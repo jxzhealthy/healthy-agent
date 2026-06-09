@@ -95,14 +95,21 @@ async def test_redis_memory_backend():
     await backend._client.aclose()
 
 
-def test_memory_manager_redis_flag():
+def test_memory_manager_backend_selection():
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
         path = f.name
+
     mm_local = MemoryManager(long_term_path=path)
     assert not mm_local.distributed
+    assert mm_local.backend_name == "local"
 
     mm_redis = MemoryManager(long_term_path=path, redis_url="redis://localhost:6379")
     assert mm_redis.distributed
+    assert mm_redis.backend_name == "redis"
+
+    mm_redis2 = MemoryManager(long_term_path=path, backend="redis")
+    assert mm_redis2.backend_name == "redis"
+
     import os
     os.unlink(path)
 
