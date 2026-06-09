@@ -50,15 +50,50 @@ class AgentLoop:
             "When you have enough information, respond directly."
         )
 
-    def _build_tools(self) -> list[dict]:
+    def _build_tools(self, prompt: str = "") -> list[dict]:
+        """Progressive disclosure: only expose relevant skills based on intent."""
+        all_skills = list(self.skills._skills.values())
+
+        if prompt:
+            relevant = self._route_skills(prompt, all_skills)
+        else:
+            relevant = all_skills
+
         tools = []
-        for schema in self.skills.list_skills():
+        for skill in relevant:
+            schema = skill.to_schema()
             tools.append({
                 "name": schema["name"],
                 "description": schema["description"],
                 "input_schema": schema["parameters"],
             })
+        logger.debug("Exposed %d/%d skills for prompt: %s", len(tools), len(all_skills), prompt[:50])
         return tools
+
+    def _route_skills(self, prompt: str, all_skills: list) -> list:
+        """Select relevant skills based on keyword matching against the prompt."""
+        prompt_lower = prompt.lower()
+
+        SKILL_KEYWORDS = {
+            "read_file": ["read", "file", "open", "cat", "show", "content", "look at"],
+            "write_file": ["write", "save", "create file", "output to"],
+            "shell": ["run", "execute", "command", "terminal", "shell", "ls", "pwd", "pip"],
+            "http_request": ["http", "url", "fetch", "api", "request", "download", "web"],
+            "summarize": ["summarize", "summary", "tldr", "brief", "shorten"],
+            "code_gen": ["code", "write", "implement", "function", "class", "script", "program"],
+            "web_search": ["search", "google", "find", "lookup", "what is"],
+        }
+
+        matched = set()
+        for skill in all_skills:
+            keywords = SKILL_KEYWORDS.get(skill.name, [])
+            if any(kw in prompt_lower for kw in keywords):
+                matched.add(skill.name)
+
+        if not matched:
+            return all_skills[:3]
+
+        return [s for s in all_skills if s.name in matched]
 
     async def run(
         self,
@@ -67,7 +102,7 @@ class AgentLoop:
         context: str = "",
         on_step: Any = None,
     ) -> AgentResult:
-        tools = self._build_tools()
+        tools = self._build_tools(prompt)
         messages = []
         if context:
             messages.append({"role": "user", "content": context})
