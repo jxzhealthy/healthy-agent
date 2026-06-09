@@ -5,27 +5,27 @@ import json
 
 import click
 
-from . import __version__
+from healthy_agent import __version__
 
 
 def _make_driver(name: str):
     if name == "anthropic":
-        from .drivers.anthropic import AnthropicDriver
+        from healthy_agent.drivers.anthropic import AnthropicDriver
         return AnthropicDriver()
     if name == "openai":
-        from .drivers.openai_compat import OpenAIDriver
+        from healthy_agent.drivers.openai_compat import OpenAIDriver
         return OpenAIDriver()
     if name == "deepseek":
-        from .drivers.openai_compat import DeepSeekDriver
+        from healthy_agent.drivers.openai_compat import DeepSeekDriver
         return DeepSeekDriver()
     if name == "zhipu":
-        from .drivers.openai_compat import ZhipuDriver
+        from healthy_agent.drivers.openai_compat import ZhipuDriver
         return ZhipuDriver()
     if name == "qwen":
-        from .drivers.openai_compat import QwenDriver
+        from healthy_agent.drivers.openai_compat import QwenDriver
         return QwenDriver()
     if name == "ollama":
-        from .drivers.openai_compat import OllamaDriver
+        from healthy_agent.drivers.openai_compat import OllamaDriver
         return OllamaDriver()
     return None
 
@@ -43,7 +43,7 @@ def main():
 @click.option("--verbose", "-v", is_flag=True, help="Show scheduling events")
 def run(task: str, cores: int, driver: str, verbose: bool):
     """Submit a task and run until completion."""
-    from .kernel.runtime import Kernel
+    from healthy_agent.kernel.runtime import Kernel
 
     async def _run():
         kernel = Kernel(num_cores=cores)
@@ -81,7 +81,7 @@ def run(task: str, cores: int, driver: str, verbose: bool):
 @click.option("--cores", "-c", default=4)
 def ps(cores: int):
     """Show kernel process table (demo)."""
-    from .kernel.runtime import Kernel
+    from healthy_agent.kernel.runtime import Kernel
 
     Kernel(num_cores=cores)
     click.echo(f"Kernel: {cores} cores, 0 processes (idle)")
@@ -103,7 +103,3 @@ def serve(host: str, port: int, cores: int, driver: str, model: str | None):
     click.echo(f"  Kernel: {cores} cores | Driver: {driver} | Model: {model or 'default'}")
     click.echo(f"  Docs: http://{host}:{port}/docs")
     uvicorn.run(app, host=host, port=port, log_level="info")
-
-
-if __name__ == "__main__":
-    main()
