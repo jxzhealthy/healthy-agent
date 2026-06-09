@@ -256,8 +256,8 @@ async function refreshSkills() {
     ).join('') : '<li class="session-item"><div class="meta">none</div></li>';
     skillList.innerHTML = llmSkills.length ? llmSkills.map(s =>
       `<li class="session-item"><b>${s.name}</b><div class="meta">${s.description}</div></li>`
-    ).join('');
-  } catch(e) {}
+    ).join('') : '<li class="session-item"><div class="meta">none</div></li>';
+  } catch(e) { console.error('refreshSkills error', e); }
 }
 
 // Init
