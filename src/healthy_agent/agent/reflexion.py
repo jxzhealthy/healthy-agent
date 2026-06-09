@@ -27,7 +27,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine
 
-from .loop import AgentLoop, AgentResult
+from .executor import Executor, AgentResult
 
 logger = logging.getLogger("healthy_agent.reflexion")
 
@@ -156,7 +156,7 @@ class ReflexionAgent:
         skills: Tool registry.
         evaluator: Async function(prompt, answer) -> Evaluation.
         max_trials: Maximum number of attempts.
-        max_rounds: Max tool-calling rounds per trial (passed to AgentLoop).
+        max_rounds: Max tool-calling rounds per trial (passed to Executor).
         system_prompt: Base system prompt.
         reflect_model: Optional separate driver for reflection (can use cheaper model).
         success_threshold: Minimum score to consider success (0.0-1.0).
@@ -207,14 +207,14 @@ class ReflexionAgent:
             # --- 1. Build context from past reflections ---
             reflection_context = _build_reflection_context(reflections)
 
-            # --- 2. Execute (run AgentLoop with reflection context) ---
-            agent = AgentLoop(
+            # --- 2. Execute (run Executor with reflection context) ---
+            executor = Executor(
                 self.driver,
                 self.skills,
                 max_rounds=self.max_rounds,
                 system_prompt=self.system_prompt,
             )
-            agent_result = await agent.run(prompt, context=reflection_context)
+            agent_result = await executor.run(prompt, context=reflection_context)
             total_tokens += agent_result.tokens_used
 
             # --- 3. Evaluate ---

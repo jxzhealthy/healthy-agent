@@ -322,16 +322,16 @@ def create_app(
                         f"- {e.key}: {e.value}" for e in mem_entries
                     )
 
-                from healthy_agent.agent import AgentLoop
-                test_agent = AgentLoop(driver, skills)
-                matched_tools = test_agent._build_tools(prompt)
+                from healthy_agent.agent import Executor
+                test_executor = Executor(driver, skills)
+                matched_tools = test_executor._build_tools(prompt)
                 use_agent = mode == "agent" and any(
                     t["name"] in ("read_file", "write_file", "edit_file", "shell", "python_eval", "search_text", "list_dir")
                     for t in matched_tools
                 )
 
                 if use_agent:
-                    agent = AgentLoop(driver, skills, system_prompt=system_prompt, max_rounds=5)
+                    executor = Executor(driver, skills, system_prompt=system_prompt, max_rounds=5)
 
                     async def on_step(step):
                         if step.role == "tool":
@@ -344,7 +344,7 @@ def create_app(
                         elif step.role == "assistant" and step.content:
                             await websocket.send_json({"type": "stream", "content": step.content, "msg_id": msg_id})
 
-                    agent_result = await agent.run(prompt, on_step=on_step)
+                    agent_result = await executor.run(prompt, on_step=on_step)
                     text = agent_result.answer
                 else:
                     try:

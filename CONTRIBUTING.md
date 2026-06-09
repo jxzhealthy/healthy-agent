@@ -38,7 +38,7 @@ src/
 ├── healthy_agent/
 │   ├── kernel/          # Process, Scheduler (MLFQ), Core, Kernel
 │   ├── syscall/         # fork, wait, exit, io, supervised_fork
-│   ├── agent/           # AgentLoop, Workflow, MultiAgent, RAG
+│   ├── agent/           # Executor, Reflexion, Workflow, MultiAgent, RAG
 │   ├── drivers/         # LLM drivers (Anthropic, OpenAI-compat) + Tool drivers
 │   ├── skill/           # Tool/Skill base classes, registry, built-ins
 │   ├── memory/          # ShortTermMemory, LongTermMemory, Redis/Mem0 backends

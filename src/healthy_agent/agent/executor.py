@@ -27,10 +27,22 @@ class AgentResult:
     tokens_used: int = 0
 
 
-class AgentLoop:
-    """Agentic loop: LLM decides which tools to call, executes them, loops until done.
+class Executor:
+    """Task executor: handles LLM generation and tool invocation.
 
-    Similar to ReAct but with OS-level scheduling underneath.
+    This is the low-level execution engine that drives a single attempt
+    at solving a task. It manages the generate-call-observe cycle required
+    by the LLM function-calling protocol.
+
+    Strategies (Reflexion, LATS, etc.) sit ABOVE this layer and decide
+    when/how to invoke the Executor, what context to inject, and whether
+    to retry.
+
+    Architecture:
+        Strategy Layer  (ReflexionAgent, Planner, etc.)
+          -> Executor   (this class - runs one attempt)
+            -> Driver   (LLM API call)
+            -> Skills   (tool execution)
     """
 
     def __init__(

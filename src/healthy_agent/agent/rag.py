@@ -236,7 +236,7 @@ class SimpleVectorStore:
 
 
 class RAGMixin:
-    """Adds retrieval-augmented generation to AgentLoop."""
+    """Adds retrieval-augmented generation to Executor."""
 
     def __init__(self, store: SimpleVectorStore | None = None):
         self.store = store or SimpleVectorStore()

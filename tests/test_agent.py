@@ -1,5 +1,5 @@
-"""Tests for agent loop, RAG, multi-agent, and workflow."""
-from healthy_agent.agent import AgentLoop, RAGMixin, SimpleVectorStore, MultiAgentCoordinator, AgentConfig, Workflow
+"""Tests for executor, RAG, multi-agent, and workflow."""
+from healthy_agent.agent import Executor, RAGMixin, SimpleVectorStore, MultiAgentCoordinator, AgentConfig, Workflow
 from healthy_agent.kernel.runtime import Kernel
 from healthy_agent.skill import SkillRegistry
 from healthy_agent.skill.base import Skill, SkillParam, SkillResult
@@ -43,12 +43,12 @@ class AddSkill(Skill):
         return SkillResult(success=True, data=params.get("a", 0) + params.get("b", 0))
 
 
-# --- Agent Loop ---
+# --- Executor ---
 
-async def test_agent_loop_no_tools():
+async def test_executor_no_tools():
     driver = MockDriver([{"text": "Hello!", "tool_calls": [], "stop_reason": "end_turn"}])
     skills = SkillRegistry()
-    agent = AgentLoop(driver, skills)
+    agent = Executor(driver, skills)
     result = await agent.run("Hi")
     assert result.answer == "Hello!"
     assert result.total_rounds == 1
@@ -61,17 +61,17 @@ async def test_agent_loop_with_tool_call():
     ])
     skills = SkillRegistry()
     skills.register(AddSkill())
-    agent = AgentLoop(driver, skills)
+    agent = Executor(driver, skills)
     result = await agent.run("What is 3+4?")
     assert "7" in result.answer
     assert result.total_rounds == 2
     assert any(s.tool_name == "add" for s in result.steps)
 
 
-async def test_agent_loop_on_step_callback():
+async def test_executor_on_step_callback():
     driver = MockDriver([{"text": "Hi", "tool_calls": [], "stop_reason": "end_turn"}])
     skills = SkillRegistry()
-    agent = AgentLoop(driver, skills)
+    agent = Executor(driver, skills)
     seen = []
     await agent.run("Hello", on_step=lambda s: seen.append(s.role))
     assert "assistant" in seen

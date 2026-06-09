@@ -142,7 +142,7 @@ ws.send(JSON.stringify({ prompt: "你好！", mode: "agent" }));
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │                        用户空间                              │
-│  AgentLoop │ Workflow │ MultiAgent │ RAG │ Supervisor        │
+│  Executor │ Workflow │ MultiAgent │ RAG │ Reflexion          │
 ├──────────────────────────────────────────────────────────────┤
 │                         系统调用                             │
 │  fork() │ wait() │ exit() │ io() │ supervised_fork()         │
@@ -168,19 +168,19 @@ ws.send(JSON.stringify({ prompt: "你好！", mode: "agent" }));
 
 ## Agent 模式
 
-### Agentic 循环（基于 OS 调度的 ReAct）
+### Executor（任务执行引擎）
 
-`AgentLoop` 运行工具增强的 ReAct 循环 —— LLM 自主决定调用哪些工具、执行、循环直到完成。技能通过 TF-IDF 余弦相似度路由，LLM 只看到相关工具（渐进式暴露）。
+`Executor` 是底层执行引擎，负责 LLM 生成和工具调用。策略层（如 `ReflexionAgent`）位于其上方，决定何时/如何重试。
 
 ```python
-from healthy_agent.agent import AgentLoop
+from healthy_agent.agent import Executor
 from healthy_agent.skill import SkillRegistry
 
 skills = SkillRegistry()
 skills.load_directory("./skills")
 
-agent = AgentLoop(driver, skills, max_rounds=10)
-result = await agent.run("读取 config.yaml 并修复语法错误")
+executor = Executor(driver, skills, max_rounds=10)
+result = await executor.run("读取 config.yaml 并修复语法错误")
 # LLM 自主执行：read_file → 分析 → edit_file → 完成
 ```
 
@@ -246,7 +246,7 @@ rag.ingest("Healthy Agent 使用 MLFQ 调度")
 rag.ingest("进程有 5 个状态：new、ready、running、blocked、terminated")
 
 context = rag.retrieve_context("调度是怎么工作的？")
-# 将 context 传入 AgentLoop 或 driver.generate()
+# 将 context 传入 Executor 或 driver.generate()
 ```
 
 ## LLM 驱动
@@ -405,7 +405,7 @@ src/
 │   │   ├── api.py          # fork / wait / exit / io
 │   │   └── supervisor.py   # supervised_fork（自动重试）
 │   ├── agent/
-│   │   ├── loop.py         # AgentLoop（ReAct + 技能路由）
+│   │   ├── executor.py     # Executor（任务执行引擎）
 │   │   ├── workflow.py     # DAG 工作流引擎
 │   │   ├── multi.py        # 多 Agent 协调器
 │   │   └── rag.py          # RAG（向量存储 + 检索）

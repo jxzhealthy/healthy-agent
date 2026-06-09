@@ -142,7 +142,7 @@ ws.send(JSON.stringify({ prompt: "Hello!", mode: "agent" }));
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │                      User Space                              │
-│  AgentLoop │ Workflow │ MultiAgent │ RAG │ Supervisor        │
+│  Executor │ Workflow │ MultiAgent │ RAG │ Reflexion          │
 ├──────────────────────────────────────────────────────────────┤
 │                       System Calls                           │
 │  fork() │ wait() │ exit() │ io() │ supervised_fork()         │
@@ -168,19 +168,19 @@ ws.send(JSON.stringify({ prompt: "Hello!", mode: "agent" }));
 
 ## Agent Patterns
 
-### Agentic Loop (ReAct with OS scheduling)
+### Executor (Task Execution Engine)
 
-The `AgentLoop` runs a tool-augmented ReAct loop — the LLM decides which tools to call, executes them, and loops until done. Skills are routed via TF-IDF cosine similarity so the LLM only sees relevant tools (progressive disclosure).
+The `Executor` is the low-level execution engine that handles LLM generation and tool invocation. Strategies like `ReflexionAgent` sit above it and decide when/how to retry.
 
 ```python
-from healthy_agent.agent import AgentLoop
+from healthy_agent.agent import Executor
 from healthy_agent.skill import SkillRegistry
 
 skills = SkillRegistry()
 skills.load_directory("./skills")
 
-agent = AgentLoop(driver, skills, max_rounds=10)
-result = await agent.run("Read config.yaml and fix the syntax error")
+executor = Executor(driver, skills, max_rounds=10)
+result = await executor.run("Read config.yaml and fix the syntax error")
 # LLM autonomously: read_file → analyze → edit_file → done
 ```
 
@@ -246,7 +246,7 @@ rag.ingest("Healthy Agent uses MLFQ scheduling")
 rag.ingest("Processes have 5 states: new, ready, running, blocked, terminated")
 
 context = rag.retrieve_context("How does scheduling work?")
-# Pass context into AgentLoop or driver.generate()
+# Pass context into Executor or driver.generate()
 ```
 
 ## LLM Drivers
@@ -405,7 +405,7 @@ src/
 │   │   ├── api.py          # fork / wait / exit / io
 │   │   └── supervisor.py   # supervised_fork (auto-retry)
 │   ├── agent/
-│   │   ├── loop.py         # AgentLoop (ReAct + skill routing)
+│   │   ├── executor.py     # Executor (task execution engine)
 │   │   ├── workflow.py     # DAG workflow engine
 │   │   ├── multi.py        # Multi-agent coordinator
 │   │   └── rag.py          # RAG (vector store + retrieval)
