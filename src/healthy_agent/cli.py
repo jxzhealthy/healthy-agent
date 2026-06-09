@@ -8,6 +8,25 @@ import click
 from . import __version__
 
 
+def _make_driver(name: str):
+    if name == "anthropic":
+        from .drivers.anthropic import AnthropicDriver
+        return AnthropicDriver()
+    if name == "openai":
+        from .drivers.openai_compat import OpenAIDriver
+        return OpenAIDriver()
+    if name == "deepseek":
+        from .drivers.openai_compat import DeepSeekDriver
+        return DeepSeekDriver()
+    if name == "zhipu":
+        from .drivers.openai_compat import ZhipuDriver
+        return ZhipuDriver()
+    if name == "ollama":
+        from .drivers.openai_compat import OllamaDriver
+        return OllamaDriver()
+    return None
+
+
 @click.group()
 @click.version_option(version=__version__, prog_name="healthy_agent")
 def main():
@@ -17,7 +36,7 @@ def main():
 @main.command()
 @click.argument("task")
 @click.option("--cores", "-c", default=4, help="Number of cores (concurrent capacity)")
-@click.option("--driver", "-d", default="mock", help="LLM driver: mock, anthropic")
+@click.option("--driver", "-d", default="mock", help="LLM driver: mock, anthropic, openai, deepseek, zhipu, ollama")
 @click.option("--verbose", "-v", is_flag=True, help="Show scheduling events")
 def run(task: str, cores: int, driver: str, verbose: bool):
     """Submit a task and run until completion."""
@@ -32,12 +51,11 @@ def run(task: str, cores: int, driver: str, verbose: bool):
             kernel._on_event = on_event
 
         async def simple_handler(process, k):
-            if driver == "anthropic":
-                from .drivers.anthropic import AnthropicDriver
-                drv = AnthropicDriver()
-                result = await drv.generate([{"role": "user", "content": task}])
-                return result.data.get("text", "") if result.success else result.error
-            return f"[mock] Would process: {task}"
+            drv = _make_driver(driver)
+            if drv is None:
+                return f"[mock] Would process: {task}"
+            result = await drv.generate([{"role": "user", "content": task}])
+            return result.data.get("text", "") if result.success else result.error
 
         if verbose:
             click.echo(f"Kernel: {cores} cores | Driver: {driver}")
