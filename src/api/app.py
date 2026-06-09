@@ -6,7 +6,7 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from healthy_agent.kernel.runtime import Kernel
@@ -286,6 +286,51 @@ def create_app(
                 "preempted": stats.total_preempted,
             },
         }
+
+    # ── WebSocket ─────────────────────────────────────────────
+
+    @app.websocket("/ws/{session_id}")
+    async def websocket_chat(websocket: WebSocket, session_id: str):
+        session = sessions.get(session_id)
+        if not session:
+            session = sessions.create(session_id=session_id)
+
+        await websocket.accept()
+        logger.info("WebSocket connected: session=%s", session_id)
+
+        try:
+            while True:
+                data = await websocket.receive_json()
+                prompt = data.get("prompt", "")
+                if not prompt:
+                    continue
+
+                session.add_message("user", prompt)
+                await websocket.send_json({"type": "user_echo", "content": prompt})
+
+                if driver:
+                    system_prompt = "You are a helpful assistant."
+                    mem_entries = session.memory.all()
+                    if mem_entries:
+                        system_prompt += "\n\nYou remember:\n" + "\n".join(
+                            f"- {e.key}: {e.value}" for e in mem_entries
+                        )
+
+                    await websocket.send_json({"type": "thinking"})
+                    result = await driver.generate(
+                        [{"role": "user", "content": prompt}],
+                        system=system_prompt,
+                    )
+                    text = result.data["text"].strip() if result.success else f"ERROR: {result.error}"
+                else:
+                    text = f"[mock] {prompt}"
+
+                session.add_message("assistant", text)
+                session.memory.put("last_reply", text, tags=["reply"])
+                await websocket.send_json({"type": "reply", "content": text})
+
+        except WebSocketDisconnect:
+            logger.info("WebSocket disconnected: session=%s", session_id)
 
     return app
 
