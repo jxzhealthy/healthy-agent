@@ -297,7 +297,7 @@ def create_app(
             },
         }
 
-    # ── WebSocket ─────────────────────────────────────────────
+    # ── WebSocket (streaming + agent mode) ─────────────────────
 
     @app.websocket("/ws/{session_id}")
     async def websocket_chat(websocket: WebSocket, session_id: str):
@@ -312,32 +312,54 @@ def create_app(
             while True:
                 data = await websocket.receive_json()
                 prompt = data.get("prompt", "")
+                mode = data.get("mode", "agent")
                 if not prompt:
                     continue
 
                 session.add_message("user", prompt)
-                await websocket.send_json({"type": "user_echo", "content": prompt})
 
-                if driver:
-                    system_prompt = "You are a helpful assistant."
-                    mem_entries = session.memory.all()
-                    if mem_entries:
-                        system_prompt += "\n\nYou remember:\n" + "\n".join(
-                            f"- {e.key}: {e.value}" for e in mem_entries
-                        )
+                if not driver:
+                    await websocket.send_json({"type": "reply", "content": f"[mock] {prompt}"})
+                    continue
 
+                system_prompt = "You are a helpful assistant with access to tools. Use them when needed."
+                mem_entries = session.memory.all()
+                if mem_entries:
+                    system_prompt += "\n\nYou remember:\n" + "\n".join(
+                        f"- {e.key}: {e.value}" for e in mem_entries
+                    )
+
+                if mode == "agent":
+                    from healthy_agent.agent import AgentLoop
+                    agent = AgentLoop(driver, skills, system_prompt=system_prompt, max_rounds=5)
+
+                    async def on_step(step):
+                        if step.role == "tool":
+                            await websocket.send_json({
+                                "type": "tool_call",
+                                "name": step.tool_name,
+                                "input": step.tool_input,
+                                "result": step.tool_result[:500],
+                            })
+                        elif step.role == "assistant" and step.content:
+                            await websocket.send_json({"type": "stream", "content": step.content})
+
+                    result = await agent.run(prompt, on_step=on_step)
+                    text = result.answer
+                else:
                     await websocket.send_json({"type": "thinking"})
-                    result = await driver.generate(
+                    chunks = []
+                    async for chunk in driver.stream(
                         [{"role": "user", "content": prompt}],
                         system=system_prompt,
-                    )
-                    text = result.data["text"].strip() if result.success else f"ERROR: {result.error}"
-                else:
-                    text = f"[mock] {prompt}"
+                    ):
+                        chunks.append(chunk)
+                        await websocket.send_json({"type": "stream", "content": chunk})
+                    text = "".join(chunks)
 
                 session.add_message("assistant", text)
                 session.memory.put("last_reply", text, tags=["reply"])
-                await websocket.send_json({"type": "reply", "content": text})
+                await websocket.send_json({"type": "done", "content": text})
 
         except WebSocketDisconnect:
             logger.info("WebSocket disconnected: session=%s", session_id)

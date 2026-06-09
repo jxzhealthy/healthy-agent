@@ -168,7 +168,9 @@ class AgentLoop:
             if text:
                 steps.append(AgentStep(role="assistant", content=text))
                 if on_step:
-                    on_step(steps[-1])
+                    r = on_step(steps[-1])
+                    if hasattr(r, '__await__'):
+                        await r
 
             if not tool_calls or stop_reason != "tool_use":
                 return AgentResult(answer=text, steps=steps, total_rounds=round_num, tokens_used=tokens)
@@ -195,7 +197,9 @@ class AgentLoop:
 
                 steps.append(step)
                 if on_step:
-                    on_step(step)
+                    r = on_step(step)
+                    if hasattr(r, '__await__'):
+                        await r
 
                 tool_results.append({
                     "type": "tool_result",

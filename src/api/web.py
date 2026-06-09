@@ -171,12 +171,61 @@ async function loadMessages() {
   el.scrollTop = el.scrollHeight;
 }
 
+let ws = null;
+let streamMsgId = null;
+let streamContent = '';
+
 async function ensureSession() {
   if (!currentSession) {
     const d = await api('POST', '/sessions', { metadata: { user: 'user' } });
     currentSession = d.session_id;
     await refreshSessions();
   }
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${proto}//${location.host}/ws/${currentSession}`);
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      handleWsMessage(msg);
+    };
+    ws.onerror = () => appendMsg('system', 'WebSocket error');
+    ws.onclose = () => { ws = null; };
+    await new Promise(r => { ws.onopen = r; });
+  }
+}
+
+function handleWsMessage(msg) {
+  if (msg.type === 'stream') {
+    if (!streamMsgId) {
+      streamMsgId = appendMsg('assistant', '');
+    }
+    streamContent += msg.content;
+    const el = document.getElementById(streamMsgId);
+    if (el) el.querySelector('.content').textContent = streamContent;
+    scrollBottom();
+  } else if (msg.type === 'tool_call') {
+    appendMsg('system', `🔧 ${msg.name}(${JSON.stringify(msg.input).slice(0,60)}) → ${(msg.result||'').slice(0,100)}`);
+  } else if (msg.type === 'thinking') {
+    if (!streamMsgId) {
+      streamMsgId = appendMsg('assistant', '<div class="loading"></div> thinking...');
+    }
+  } else if (msg.type === 'done') {
+    if (streamMsgId) {
+      const el = document.getElementById(streamMsgId);
+      if (el) el.querySelector('.content').textContent = msg.content;
+    } else {
+      appendMsg('assistant', msg.content);
+    }
+    streamMsgId = null;
+    streamContent = '';
+    refreshKernel();
+    refreshSessions();
+  }
+}
+
+function scrollBottom() {
+  const el = document.getElementById('messages');
+  el.scrollTop = el.scrollHeight;
 }
 
 async function sendMessage() {
@@ -187,36 +236,10 @@ async function sendMessage() {
   input.value = '';
   input.focus();
 
-  // Show user message immediately
   appendMsg('user', prompt);
-
-  // Show loading
-  const loadingId = appendMsg('assistant', '<div class="loading"></div> thinking...');
-
-  // Submit task
-  const task = await api('POST', `/sessions/${currentSession}/tasks`, {
-    task_type: 'chat',
-    payload: { prompt }
-  });
-
-  // Poll for result (input stays enabled, user can send more)
-  const taskId = task.task_id;
-  const poll = setInterval(async () => {
-    try {
-      const r = await api('GET', `/sessions/${currentSession}/tasks/${taskId}`);
-      if (r.status !== 'running') {
-        clearInterval(poll);
-        removeMsg(loadingId);
-        appendMsg('assistant', r.result || r.status);
-        refreshKernel();
-        refreshSessions();
-      }
-    } catch(e) {
-      clearInterval(poll);
-      removeMsg(loadingId);
-      appendMsg('system', 'Request failed: ' + e.message);
-    }
-  }, 500);
+  streamMsgId = null;
+  streamContent = '';
+  ws.send(JSON.stringify({ prompt, mode: 'agent' }));
 }
 
 function appendMsg(role, content) {
