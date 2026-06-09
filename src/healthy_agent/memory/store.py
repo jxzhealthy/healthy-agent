@@ -125,20 +125,32 @@ class LongTermMemory:
 
 
 class MemoryManager:
-    """Unified interface — short-term (RAM) + long-term (disk)."""
+    """Unified interface — short-term (RAM) + long-term (disk or Redis)."""
 
     def __init__(
         self,
         *,
         short_term_ttl: float = 300.0,
         long_term_path: str | Path = "~/.healthy_agent/memory.json",
+        redis_url: str | None = None,
     ):
         self.short = ShortTermMemory(default_ttl=short_term_ttl)
+        self._redis_backend = None
+        if redis_url:
+            from .backend import RedisMemoryBackend
+            self._redis_backend = RedisMemoryBackend(redis_url)
         self.long = LongTermMemory(path=long_term_path)
 
     def remember(self, key: str, value: Any, *, persist: bool = False, tags: list[str] | None = None) -> None:
         self.short.put(key, value, tags=tags)
         if persist:
+            self.long.put(key, value, tags=tags)
+
+    async def remember_async(self, key: str, value: Any, *, persist: bool = False, ttl: int | None = None, tags: list[str] | None = None) -> None:
+        self.short.put(key, value, tags=tags)
+        if persist and self._redis_backend:
+            await self._redis_backend.put(key, value, ttl=ttl, tags=tags)
+        elif persist:
             self.long.put(key, value, tags=tags)
 
     def recall(self, key: str) -> Any | None:
@@ -147,7 +159,26 @@ class MemoryManager:
             return value
         return self.long.get(key)
 
+    async def recall_async(self, key: str) -> Any | None:
+        value = self.short.get(key)
+        if value is not None:
+            return value
+        if self._redis_backend:
+            return await self._redis_backend.get(key)
+        return self.long.get(key)
+
     def forget(self, key: str, *, persistent: bool = False) -> None:
         self.short.delete(key)
         if persistent:
             self.long.delete(key)
+
+    async def forget_async(self, key: str, *, persistent: bool = False) -> None:
+        self.short.delete(key)
+        if persistent and self._redis_backend:
+            await self._redis_backend.delete(key)
+        elif persistent:
+            self.long.delete(key)
+
+    @property
+    def distributed(self) -> bool:
+        return self._redis_backend is not None

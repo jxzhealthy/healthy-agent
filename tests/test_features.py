@@ -62,6 +62,51 @@ def test_memory_manager():
     os.unlink(path)
 
 
+async def test_redis_memory_backend():
+    import fakeredis.aioredis as fake
+    from healthy_agent.memory.backend import RedisMemoryBackend
+
+    backend = RedisMemoryBackend.__new__(RedisMemoryBackend)
+    backend._client = fake.FakeRedis(decode_responses=True)
+    backend._prefix = "test:mem:"
+    backend._tags_key = "test:mem:_tags"
+
+    await backend.put("k1", {"data": 42}, tags=["num"])
+    await backend.put("k2", "hello", tags=["str"])
+
+    assert await backend.get("k1") == {"data": 42}
+    assert await backend.get("k2") == "hello"
+    assert await backend.get("missing") is None
+
+    results = await backend.search("num")
+    assert len(results) == 1
+    assert results[0]["key"] == "k1"
+
+    all_data = await backend.all()
+    assert len(all_data) == 2
+
+    await backend.delete("k1")
+    assert await backend.get("k1") is None
+    assert await backend.size() == 1
+
+    await backend.clear()
+    assert await backend.size() == 0
+
+    await backend._client.aclose()
+
+
+def test_memory_manager_redis_flag():
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        path = f.name
+    mm_local = MemoryManager(long_term_path=path)
+    assert not mm_local.distributed
+
+    mm_redis = MemoryManager(long_term_path=path, redis_url="redis://localhost:6379")
+    assert mm_redis.distributed
+    import os
+    os.unlink(path)
+
+
 # --- Session ---
 
 def test_session_creation():
