@@ -1,4 +1,4 @@
-"""Shell and HTTP tools."""
+"""Shell, HTTP, and Python eval tools."""
 from healthy_agent.skill.base import Tool, SkillParam, SkillResult
 
 
@@ -53,3 +53,40 @@ class HttpTool(Tool):
                 return SkillResult(success=resp.is_success, data=resp.text[:50000])
         except Exception as e:
             return SkillResult(success=False, error=str(e))
+
+
+class PythonEvalTool(Tool):
+    @property
+    def name(self): return "python_eval"
+    @property
+    def description(self): return "Evaluate a Python expression or execute a short script. Returns the result or stdout."
+    @property
+    def parameters(self):
+        return [SkillParam(name="code", type="string", description="Python code to evaluate")]
+
+    async def execute(self, params, process=None, kernel=None):
+        import asyncio
+        import sys
+        import tempfile
+        import os
+        code = params.get("code", "")
+        if not code:
+            return SkillResult(success=False, error="Missing 'code'")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+            f.write(code)
+            f.flush()
+            path = f.name
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, path,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15.0)
+            output = stdout.decode(errors="replace")[:30000]
+            if proc.returncode == 0:
+                return SkillResult(success=True, data=output or "(no output)")
+            return SkillResult(success=False, data=output, error=stderr.decode(errors="replace")[:5000])
+        except asyncio.TimeoutError:
+            return SkillResult(success=False, error="Execution timed out (15s)")
+        finally:
+            os.unlink(path)
