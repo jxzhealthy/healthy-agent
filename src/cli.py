@@ -4,8 +4,11 @@ import asyncio
 import json
 
 import click
+from dotenv import load_dotenv
 
 from healthy_agent import __version__
+
+load_dotenv()
 
 
 def _make_driver(name: str):
