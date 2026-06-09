@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Agent OS Kernel — CPU-scheduling-inspired runtime for LLM agent workloads"
 requires-python = ">=3.11"
 license = "MIT"
-authors = [{ name = "jiaoxuezhi", email = "jiaoxuezhi.jxz@alibaba-inc.com" }]
+authors = [{ name = "jxzhealthy", email = "13419701154@163.com" }]
 keywords = ["agent", "llm", "scheduler", "kernel", "mlfq", "async"]
 classifiers = [
     "Development Status :: 3 - Alpha",
