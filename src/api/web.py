@@ -78,11 +78,11 @@ button.secondary:hover { background: #475569; }
 
   <div class="panel chat-area">
     <div class="messages" id="messages">
-      <div class="empty">Create or select a session to start</div>
+      <div class="empty">Type a message to start</div>
     </div>
     <div class="input-area">
-      <input type="text" id="promptInput" placeholder="Type a message..." onkeydown="if(event.key==='Enter')sendMessage()" disabled>
-      <button onclick="sendMessage()" id="sendBtn" disabled>Send</button>
+      <input type="text" id="promptInput" placeholder="Type a message..." onkeydown="if(event.key==='Enter')sendMessage()">
+      <button onclick="sendMessage()" id="sendBtn">Send</button>
     </div>
   </div>
 </div>
@@ -159,8 +159,16 @@ async function loadMessages() {
   el.scrollTop = el.scrollHeight;
 }
 
+async function ensureSession() {
+  if (!currentSession) {
+    const d = await api('POST', '/sessions', { metadata: { user: 'user' } });
+    currentSession = d.session_id;
+    await refreshSessions();
+  }
+}
+
 async function sendMessage() {
-  if (!currentSession) return;
+  await ensureSession();
   const input = document.getElementById('promptInput');
   const prompt = input.value.trim();
   if (!prompt) return;
