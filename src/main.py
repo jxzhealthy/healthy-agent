@@ -19,11 +19,11 @@ load_dotenv()
 
 def main():
     parser = argparse.ArgumentParser(description="Healthy Agent Server")
-    parser.add_argument("--host", default="0.0.0.0")
-    parser.add_argument("--port", "-p", type=int, default=8000)
-    parser.add_argument("--cores", "-c", type=int, default=4)
-    parser.add_argument("--driver", "-d", default="mock", choices=["mock", "anthropic", "openai", "deepseek", "zhipu", "qwen", "ollama"])
-    parser.add_argument("--model", "-m", default=None)
+    parser.add_argument("--host", default=os.environ.get("HA_HOST", "0.0.0.0"))
+    parser.add_argument("--port", "-p", type=int, default=int(os.environ.get("HA_PORT", "8000")))
+    parser.add_argument("--cores", "-c", type=int, default=int(os.environ.get("HA_CORES", "4")))
+    parser.add_argument("--driver", "-d", default=os.environ.get("HA_DRIVER", "mock"), choices=["mock", "anthropic", "openai", "deepseek", "zhipu", "qwen", "ollama"])
+    parser.add_argument("--model", "-m", default=os.environ.get("HA_MODEL"))
     parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
 
