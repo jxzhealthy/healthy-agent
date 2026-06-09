@@ -183,16 +183,24 @@ async function sendMessage() {
   // Poll for result
   const taskId = task.task_id;
   const poll = setInterval(async () => {
-    const r = await api('GET', `/sessions/${currentSession}/tasks/${taskId}`);
-    if (r.status === 'completed') {
+    try {
+      const r = await api('GET', `/sessions/${currentSession}/tasks/${taskId}`);
+      if (r.status !== 'running') {
+        clearInterval(poll);
+        removeMsg(loadingId);
+        appendMsg('assistant', r.result || r.status);
+        input.disabled = false;
+        document.getElementById('sendBtn').disabled = false;
+        input.focus();
+        refreshKernel();
+        refreshSessions();
+      }
+    } catch(e) {
       clearInterval(poll);
       removeMsg(loadingId);
-      appendMsg('assistant', r.result);
+      appendMsg('system', 'Request failed: ' + e.message);
       input.disabled = false;
       document.getElementById('sendBtn').disabled = false;
-      input.focus();
-      refreshKernel();
-      refreshSessions();
     }
   }, 500);
 }
