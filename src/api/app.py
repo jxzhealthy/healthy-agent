@@ -9,10 +9,10 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from ..kernel.runtime import Kernel
-from ..session import SessionManager
-from ..skill import SkillRegistry
-from ..skill.builtin import SummarizeSkill, CodeGenSkill
+from healthy_agent.kernel.runtime import Kernel
+from healthy_agent.session import SessionManager
+from healthy_agent.skill import SkillRegistry
+from healthy_agent.skill.builtin import SummarizeSkill, CodeGenSkill
 
 logger = logging.getLogger("healthy_agent.server")
 
@@ -76,19 +76,19 @@ def create_app(
         nonlocal driver
         logger.info("Starting Healthy Agent server: cores=%d driver=%s", num_cores, driver_name)
         if driver_name == "anthropic":
-            from ..drivers.anthropic import AnthropicDriver
+            from healthy_agent.drivers.anthropic import AnthropicDriver
             driver = AnthropicDriver(model=model or "claude-sonnet-4-20250514")
         elif driver_name == "deepseek":
-            from ..drivers.openai_compat import DeepSeekDriver
+            from healthy_agent.drivers.openai_compat import DeepSeekDriver
             driver = DeepSeekDriver(model=model or "deepseek-chat")
         elif driver_name == "zhipu":
-            from ..drivers.openai_compat import ZhipuDriver
+            from healthy_agent.drivers.openai_compat import ZhipuDriver
             driver = ZhipuDriver(model=model or "glm-4")
         elif driver_name == "qwen":
-            from ..drivers.openai_compat import QwenDriver
+            from healthy_agent.drivers.openai_compat import QwenDriver
             driver = QwenDriver(model=model or "qwen-plus")
         elif driver_name == "ollama":
-            from ..drivers.openai_compat import OllamaDriver
+            from healthy_agent.drivers.openai_compat import OllamaDriver
             driver = OllamaDriver(model=model or "llama3")
 
         async def _kernel_loop():
@@ -142,7 +142,7 @@ def create_app(
         async def task_handler(process, k):
             payload = process.payload
             if driver and payload.get("prompt"):
-                from ..syscall import io
+                from healthy_agent.syscall import io
                 result = await io(k, process, driver.generate(
                     [{"role": "user", "content": payload["prompt"]}],
                     system=payload.get("system", "You are a helpful assistant."),
@@ -254,3 +254,13 @@ def create_app(
         }
 
     return app
+
+
+def app_instance() -> FastAPI:
+    """Factory for uvicorn reload mode. Reads config from env vars."""
+    import os
+    return create_app(
+        num_cores=int(os.environ.get("HA_CORES", "4")),
+        driver_name=os.environ.get("HA_DRIVER", "mock"),
+        model=os.environ.get("HA_MODEL"),
+    )

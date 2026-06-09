@@ -97,7 +97,7 @@ def ps(cores: int):
 def serve(host: str, port: int, cores: int, driver: str, model: str | None):
     """Start the HTTP server (Kernel runs persistently)."""
     import uvicorn
-    from .server import create_app
+    from api import create_app
     app = create_app(num_cores=cores, driver_name=driver, model=model)
     click.echo(f"Healthy Agent server starting on {host}:{port}")
     click.echo(f"  Kernel: {cores} cores | Driver: {driver} | Model: {model or 'default'}")

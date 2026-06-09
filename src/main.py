@@ -12,7 +12,6 @@ import os
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from healthy_agent.server import create_app
 
 
 def main():
@@ -32,8 +31,20 @@ def main():
     )
 
     import uvicorn
-    app = create_app(num_cores=args.cores, driver_name=args.driver, model=args.model)
-    uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level.lower())
+
+    os.environ["HA_CORES"] = str(args.cores)
+    os.environ["HA_DRIVER"] = args.driver
+    if args.model:
+        os.environ["HA_MODEL"] = args.model
+
+    uvicorn.run(
+        "api.app:app_instance",
+        host=args.host,
+        port=args.port,
+        log_level=args.log_level.lower(),
+        reload=True,
+        factory=True,
+    )
 
 
 if __name__ == "__main__":
