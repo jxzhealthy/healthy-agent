@@ -70,30 +70,68 @@ class AgentLoop:
         logger.debug("Exposed %d/%d skills for prompt: %s", len(tools), len(all_skills), prompt[:50])
         return tools
 
-    def _route_skills(self, prompt: str, all_skills: list) -> list:
-        """Select relevant skills based on keyword matching against the prompt."""
-        prompt_lower = prompt.lower()
+    def _route_skills(self, prompt: str, all_skills: list, top_k: int = 3) -> list:
+        """Select relevant skills using TF-IDF cosine similarity."""
+        import math
+        import re
 
-        SKILL_KEYWORDS = {
-            "read_file": ["read", "file", "open", "cat", "show", "content", "look at"],
-            "write_file": ["write", "save", "create file", "output to"],
-            "shell": ["run", "execute", "command", "terminal", "shell", "ls", "pwd", "pip"],
-            "http_request": ["http", "url", "fetch", "api", "request", "download", "web"],
-            "summarize": ["summarize", "summary", "tldr", "brief", "shorten"],
-            "code_gen": ["code", "write", "implement", "function", "class", "script", "program"],
-            "web_search": ["search", "google", "find", "lookup", "what is"],
-        }
+        def tokenize(text: str) -> list[str]:
+            return re.findall(r'[a-z]+', text.lower())
 
-        matched = set()
-        for skill in all_skills:
-            keywords = SKILL_KEYWORDS.get(skill.name, [])
-            if any(kw in prompt_lower for kw in keywords):
-                matched.add(skill.name)
+        def build_tfidf(docs: list[list[str]]) -> tuple[list[dict], dict]:
+            df = {}
+            for doc in docs:
+                for w in set(doc):
+                    df[w] = df.get(w, 0) + 1
+            n = len(docs)
+            idf = {w: math.log(n / (f + 1)) + 1 for w, f in df.items()}
+            vectors = []
+            for doc in docs:
+                tf = {}
+                for w in doc:
+                    tf[w] = tf.get(w, 0) + 1
+                vec = {w: (c / len(doc)) * idf.get(w, 1) for w, c in tf.items()} if doc else {}
+                vectors.append(vec)
+            return vectors, idf
 
-        if not matched:
-            return all_skills[:3]
+        def cosine_sim(v1: dict, v2: dict) -> float:
+            shared = set(v1) & set(v2)
+            if not shared:
+                return 0.0
+            dot = sum(v1[w] * v2[w] for w in shared)
+            mag1 = math.sqrt(sum(x * x for x in v1.values()))
+            mag2 = math.sqrt(sum(x * x for x in v2.values()))
+            if mag1 == 0 or mag2 == 0:
+                return 0.0
+            return dot / (mag1 * mag2)
 
-        return [s for s in all_skills if s.name in matched]
+        skill_texts = []
+        for s in all_skills:
+            params_text = " ".join(p.name + " " + p.description for p in s.parameters)
+            skill_texts.append(f"{s.name} {s.description} {params_text}")
+
+        docs = [tokenize(t) for t in skill_texts]
+        query_tokens = tokenize(prompt)
+        all_docs = docs + [query_tokens]
+
+        vectors, _ = build_tfidf(all_docs)
+        query_vec = vectors[-1]
+        skill_vecs = vectors[:-1]
+
+        scored = []
+        for i, skill in enumerate(all_skills):
+            sim = cosine_sim(query_vec, skill_vecs[i])
+            scored.append((sim, skill))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        threshold = 0.1
+        relevant = [s for sim, s in scored if sim >= threshold][:top_k]
+
+        if not relevant:
+            relevant = [s for _, s in scored[:top_k]]
+
+        return relevant
 
     async def run(
         self,
