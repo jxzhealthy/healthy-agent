@@ -67,8 +67,11 @@ def create_app(
     skills = SkillRegistry()
     import os
     from pathlib import Path
-    default_skills_dir = skills_dir or os.environ.get("HA_SKILLS_DIR", str(Path(__file__).parent.parent.parent / "skills"))
-    skills.load_directory(default_skills_dir)
+    builtin_skills_dir = Path(__file__).parent.parent.parent / "skills"
+    skills.load_directory(builtin_skills_dir)
+    extra_skills_dir = skills_dir or os.environ.get("HA_SKILLS_DIR")
+    if extra_skills_dir and str(Path(extra_skills_dir).resolve()) != str(builtin_skills_dir.resolve()):
+        skills.load_directory(extra_skills_dir)
 
     driver = None
     task_results: dict[str, dict] = {}
