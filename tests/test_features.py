@@ -3,7 +3,7 @@ import json
 import tempfile
 
 from healthy_agent.memory import ShortTermMemory, LongTermMemory, MemoryManager
-from healthy_agent.session import Session, SessionManager
+from healthy_agent.session import SessionManager
 from healthy_agent.mcp.server import McpServer
 from healthy_agent.skill import Skill, SkillRegistry
 from healthy_agent.skill.base import SkillParam, SkillResult
@@ -117,37 +117,57 @@ def test_memory_manager_backend_selection():
 # --- Session ---
 
 def test_session_creation():
-    s = Session()
+    sm = SessionManager(memory_dir=tempfile.mkdtemp())
+    s = sm.create()
     assert s.active
     assert len(s.session_id) == 12
 
 
 def test_session_messages():
-    s = Session()
+    sm = SessionManager(memory_dir=tempfile.mkdtemp())
+    s = sm.create()
     s.add_message("user", "hello")
     s.add_message("assistant", "hi")
     assert len(s.get_history()) == 2
     assert s.get_history(last_n=1)[0]["role"] == "assistant"
 
 
-def test_session_isolation():
-    sm = SessionManager()
+def test_session_memory_isolation():
+    sm = SessionManager(memory_dir=tempfile.mkdtemp())
     s1 = sm.create()
     s2 = sm.create()
-    s1.memory.put("key", "session1")
-    s2.memory.put("key", "session2")
-    assert s1.memory.get("key") == "session1"
-    assert s2.memory.get("key") == "session2"
+
+    s1.memory.put("key", "session1_short")
+    s2.memory.put("key", "session2_short")
+    assert s1.memory.get("key") == "session1_short"
+    assert s2.memory.get("key") == "session2_short"
+
+    s1.mem.remember("pref", "dark_mode", persist=True)
+    s2.mem.remember("pref", "light_mode", persist=True)
+    assert s1.mem.recall("pref") == "dark_mode"
+    assert s2.mem.recall("pref") == "light_mode"
+
+    s1.mem.short.clear()
+    s2.mem.short.clear()
+    assert s1.mem.recall("pref") == "dark_mode"
+    assert s2.mem.recall("pref") == "light_mode"
 
 
 def test_session_lifecycle():
-    sm = SessionManager()
+    sm = SessionManager(memory_dir=tempfile.mkdtemp())
     s = sm.create(metadata={"user": "test"})
     assert sm.active_count == 1
     sm.close(s.session_id)
     assert not s.active
     sm.destroy(s.session_id)
     assert sm.get(s.session_id) is None
+
+
+def test_session_to_dict_shows_backend():
+    sm = SessionManager(memory_dir=tempfile.mkdtemp())
+    s = sm.create()
+    d = s.to_dict()
+    assert d["memory_backend"] == "local"
 
 
 # --- MCP ---
