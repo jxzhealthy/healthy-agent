@@ -84,5 +84,83 @@ class SkillRegistry:
             except Exception as e:
                 logger.warning("Failed to load %s: %s", py_file.name, e)
 
+        for md_file in sorted(directory.glob("*.md")):
+            if md_file.name.startswith("_"):
+                continue
+            try:
+                skill = self._load_md_skill(md_file)
+                if skill:
+                    self.register(skill)
+                    loaded += 1
+            except Exception as e:
+                logger.warning("Failed to load %s: %s", md_file.name, e)
+
         logger.info("Loaded %d skills from %s", loaded, directory)
         return loaded
+
+    def _load_md_skill(self, path: Path) -> Skill | None:
+        """Load a skill from a markdown file with YAML frontmatter."""
+        import yaml
+
+        content = path.read_text(encoding="utf-8")
+        if not content.startswith("---"):
+            return None
+
+        parts = content.split("---", 2)
+        if len(parts) < 3:
+            return None
+
+        meta = yaml.safe_load(parts[1])
+        body = parts[2].strip()
+
+        name = meta.get("name", path.stem)
+        description = meta.get("description", "")
+        params_def = meta.get("parameters", [])
+
+        from .base import SkillParam, SkillResult
+
+        params = [
+            SkillParam(
+                name=p["name"],
+                type=p.get("type", "string"),
+                description=p.get("description", ""),
+                required=p.get("required", True),
+            )
+            for p in params_def
+        ]
+
+        system_prompt = ""
+        user_template = body
+        if "# System" in body and "# Prompt" in body:
+            sys_part, prompt_part = body.split("# Prompt", 1)
+            system_prompt = sys_part.replace("# System", "").strip()
+            user_template = prompt_part.strip()
+
+        class MdSkill(Skill):
+            @property
+            def name(self_inner): return name
+            @property
+            def description(self_inner): return description
+            @property
+            def parameters(self_inner): return params
+
+            async def execute(self_inner, p, process=None, kernel=None):
+                driver = p.get("_driver")
+                if not driver:
+                    return SkillResult(success=True, data=f"[mock] {name}: would process with LLM")
+                try:
+                    rendered = user_template
+                    for param in params:
+                        rendered = rendered.replace("{" + param.name + "}", str(p.get(param.name, "")))
+                    sys_rendered = system_prompt
+                    for param in params:
+                        sys_rendered = sys_rendered.replace("{" + param.name + "}", str(p.get(param.name, "")))
+                    result = await driver.generate(
+                        [{"role": "user", "content": rendered}],
+                        system=sys_rendered or "You are a helpful assistant.",
+                    )
+                    return SkillResult(success=result.success, data=result.data["text"].strip() if result.success else "", error=result.error)
+                except Exception as e:
+                    return SkillResult(success=False, error=str(e))
+
+        return MdSkill()
