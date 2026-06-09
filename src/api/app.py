@@ -358,14 +358,25 @@ def create_app(
                     text = result.answer
                 else:
                     await websocket.send_json({"type": "thinking"})
-                    chunks = []
-                    async for chunk in driver.stream(
-                        [{"role": "user", "content": prompt}],
-                        system=system_prompt,
-                    ):
-                        chunks.append(chunk)
-                        await websocket.send_json({"type": "stream", "content": chunk})
-                    text = "".join(chunks)
+                    try:
+                        chunks = []
+                        async for chunk in driver.stream(
+                            [{"role": "user", "content": prompt}],
+                            system=system_prompt,
+                        ):
+                            chunks.append(chunk)
+                            await websocket.send_json({"type": "stream", "content": chunk})
+                        text = "".join(chunks)
+                    except Exception:
+                        result = await driver.generate(
+                            [{"role": "user", "content": prompt}],
+                            system=system_prompt,
+                        )
+                        text = result.data["text"].strip() if result.success else f"ERROR: {result.error}"
+                        import asyncio
+                        for i in range(0, len(text), 20):
+                            await websocket.send_json({"type": "stream", "content": text[i:i+20]})
+                            await asyncio.sleep(0.03)
 
                 session.add_message("assistant", text)
                 session.memory.put("last_reply", text, tags=["reply"])
