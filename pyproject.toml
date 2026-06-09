@@ -1,0 +1,55 @@
+[project]
+name = "healthy-agent"
+version = "0.1.0"
+description = "Agent OS Kernel — CPU-scheduling-inspired runtime for LLM agent workloads"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "jiaoxuezhi", email = "jiaoxuezhi.jxz@alibaba-inc.com" }]
+keywords = ["agent", "llm", "scheduler", "kernel", "mlfq", "async"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+dependencies = [
+    "anthropic>=0.42.0",
+    "httpx>=0.28",
+    "click>=8.0",
+    "redis>=5.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/jxzhealthy/healthy-agent"
+Repository = "https://github.com/jxzhealthy/healthy-agent"
+Issues = "https://github.com/jxzhealthy/healthy-agent/issues"
+
+[project.scripts]
+healthy-agent = "healthy_agent.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/healthy_agent"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "fakeredis>=2.20",
+]
