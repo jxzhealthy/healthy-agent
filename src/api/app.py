@@ -308,19 +308,12 @@ def create_app(
         await websocket.accept()
         logger.info("WebSocket connected: session=%s", session_id)
 
-        try:
-            while True:
-                data = await websocket.receive_json()
-                prompt = data.get("prompt", "")
-                mode = data.get("mode", "agent")
-                if not prompt:
-                    continue
-
-                session.add_message("user", prompt)
-
+        async def process_message(prompt: str, mode: str, msg_id: str):
+            """Runs as a Kernel process — scheduled on cores, not blocking WebSocket."""
+            try:
                 if not driver:
-                    await websocket.send_json({"type": "reply", "content": f"[mock] {prompt}"})
-                    continue
+                    await websocket.send_json({"type": "done", "content": f"[mock] {prompt}", "msg_id": msg_id})
+                    return
 
                 system_prompt = "You are a helpful assistant with access to tools. Use them when needed."
                 mem_entries = session.memory.all()
@@ -329,35 +322,30 @@ def create_app(
                         f"- {e.key}: {e.value}" for e in mem_entries
                     )
 
-                use_agent = mode == "agent"
-                if use_agent:
-                    from healthy_agent.agent import AgentLoop
-                    test_agent = AgentLoop(driver, skills)
-                    matched_tools = test_agent._build_tools(prompt)
-                    use_agent = len(matched_tools) > 0 and any(
-                        t["name"] in ("read_file", "write_file", "edit_file", "shell", "python_eval", "search_text", "list_dir")
-                        for t in matched_tools
-                    )
-
-                await websocket.send_json({"type": "thinking"})
+                from healthy_agent.agent import AgentLoop
+                test_agent = AgentLoop(driver, skills)
+                matched_tools = test_agent._build_tools(prompt)
+                use_agent = mode == "agent" and any(
+                    t["name"] in ("read_file", "write_file", "edit_file", "shell", "python_eval", "search_text", "list_dir")
+                    for t in matched_tools
+                )
 
                 if use_agent:
-                    from healthy_agent.agent import AgentLoop
                     agent = AgentLoop(driver, skills, system_prompt=system_prompt, max_rounds=5)
 
                     async def on_step(step):
                         if step.role == "tool":
                             await websocket.send_json({
-                                "type": "tool_call",
+                                "type": "tool_call", "msg_id": msg_id,
                                 "name": step.tool_name,
                                 "input": step.tool_input,
                                 "result": step.tool_result[:500],
                             })
                         elif step.role == "assistant" and step.content:
-                            await websocket.send_json({"type": "stream", "content": step.content})
+                            await websocket.send_json({"type": "stream", "content": step.content, "msg_id": msg_id})
 
-                    result = await agent.run(prompt, on_step=on_step)
-                    text = result.answer
+                    agent_result = await agent.run(prompt, on_step=on_step)
+                    text = agent_result.answer
                 else:
                     try:
                         chunks = []
@@ -366,18 +354,38 @@ def create_app(
                             system=system_prompt,
                         ):
                             chunks.append(chunk)
-                            await websocket.send_json({"type": "stream", "content": chunk})
+                            await websocket.send_json({"type": "stream", "content": chunk, "msg_id": msg_id})
                         text = "".join(chunks)
                     except Exception:
-                        result = await driver.generate(
+                        gen_result = await driver.generate(
                             [{"role": "user", "content": prompt}],
                             system=system_prompt,
                         )
-                        text = result.data["text"].strip() if result.success else f"ERROR: {result.error}"
+                        text = gen_result.data["text"].strip() if gen_result.success else f"ERROR: {gen_result.error}"
 
                 session.add_message("assistant", text)
                 session.memory.put("last_reply", text, tags=["reply"])
-                await websocket.send_json({"type": "done", "content": text})
+                await websocket.send_json({"type": "done", "content": text, "msg_id": msg_id})
+            except Exception as e:
+                await websocket.send_json({"type": "error", "content": str(e), "msg_id": msg_id})
+
+        try:
+            while True:
+                data = await websocket.receive_json()
+                prompt = data.get("prompt", "")
+                mode = data.get("mode", "agent")
+                if not prompt:
+                    continue
+
+                msg_id = uuid.uuid4().hex[:8]
+                session.add_message("user", prompt)
+                await websocket.send_json({"type": "thinking", "msg_id": msg_id})
+
+                async def _kernel_handler(process, k):
+                    await process_message(prompt, mode, msg_id)
+                    return "done"
+
+                kernel.spawn(f"ws:{msg_id}", {}, handler=_kernel_handler, preemptible=False)
 
         except WebSocketDisconnect:
             logger.info("WebSocket disconnected: session=%s", session_id)
