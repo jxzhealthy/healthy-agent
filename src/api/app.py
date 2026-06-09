@@ -146,26 +146,15 @@ def create_app(
                 prompt = payload["prompt"]
                 session.add_message("user", prompt)
 
-                memory_context = ""
+                system_prompt = payload.get("system", "You are a helpful assistant.")
                 mem_entries = session.memory.all()
                 if mem_entries:
-                    memory_context = "Relevant memory:\n" + "\n".join(
+                    system_prompt += "\n\nYou remember the following:\n" + "\n".join(
                         f"- {e.key}: {e.value}" for e in mem_entries
                     )
 
-                recent = session.get_history(last_n=6)
-                messages = [
-                    {"role": m["role"], "content": m["content"]}
-                    for m in recent
-                    if m["role"] in ("user", "assistant")
-                ]
-
-                system_prompt = payload.get("system", "You are a helpful assistant.")
-                if memory_context:
-                    system_prompt += f"\n\n{memory_context}"
-
                 result = await io(k, process, driver.generate(
-                    messages,
+                    [{"role": "user", "content": prompt}],
                     system=system_prompt,
                 ))
                 text = result.data["text"].strip() if result.success else f"ERROR: {result.error}"
