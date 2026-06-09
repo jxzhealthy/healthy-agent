@@ -1,0 +1,190 @@
+"""Tests for memory, session, MCP, and skill systems."""
+import json
+import tempfile
+
+from healthy_agent.memory import ShortTermMemory, LongTermMemory, MemoryManager
+from healthy_agent.session import Session, SessionManager
+from healthy_agent.mcp.server import McpServer
+from healthy_agent.skill import Skill, SkillRegistry
+from healthy_agent.skill.base import SkillParam, SkillResult
+from healthy_agent.skill.builtin import SummarizeSkill, CodeGenSkill
+
+
+# --- Memory ---
+
+def test_short_term_put_get():
+    m = ShortTermMemory()
+    m.put("key1", "value1")
+    assert m.get("key1") == "value1"
+    assert m.get("missing") is None
+
+
+def test_short_term_ttl():
+    m = ShortTermMemory()
+    m.put("key1", "value1", ttl=0)
+    import time
+    time.sleep(0.01)
+    assert m.get("key1") is None
+
+
+def test_short_term_tags():
+    m = ShortTermMemory()
+    m.put("a", 1, tags=["num"])
+    m.put("b", 2, tags=["num"])
+    m.put("c", "x", tags=["str"])
+    assert len(m.search("num")) == 2
+    assert len(m.search("str")) == 1
+
+
+def test_long_term_persist():
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        path = f.name
+    lt = LongTermMemory(path=path)
+    lt.put("key1", {"data": 42})
+    lt2 = LongTermMemory(path=path)
+    assert lt2.get("key1") == {"data": 42}
+    import os
+    os.unlink(path)
+
+
+def test_memory_manager():
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        path = f.name
+    mm = MemoryManager(long_term_path=path)
+    mm.remember("temp", "goes away")
+    mm.remember("perm", "stays", persist=True)
+    assert mm.recall("temp") == "goes away"
+    assert mm.recall("perm") == "stays"
+    mm.short.clear()
+    assert mm.recall("temp") is None
+    assert mm.recall("perm") == "stays"
+    import os
+    os.unlink(path)
+
+
+# --- Session ---
+
+def test_session_creation():
+    s = Session()
+    assert s.active
+    assert len(s.session_id) == 12
+
+
+def test_session_messages():
+    s = Session()
+    s.add_message("user", "hello")
+    s.add_message("assistant", "hi")
+    assert len(s.get_history()) == 2
+    assert s.get_history(last_n=1)[0]["role"] == "assistant"
+
+
+def test_session_isolation():
+    sm = SessionManager()
+    s1 = sm.create()
+    s2 = sm.create()
+    s1.memory.put("key", "session1")
+    s2.memory.put("key", "session2")
+    assert s1.memory.get("key") == "session1"
+    assert s2.memory.get("key") == "session2"
+
+
+def test_session_lifecycle():
+    sm = SessionManager()
+    s = sm.create(metadata={"user": "test"})
+    assert sm.active_count == 1
+    sm.close(s.session_id)
+    assert not s.active
+    sm.destroy(s.session_id)
+    assert sm.get(s.session_id) is None
+
+
+# --- MCP ---
+
+async def test_mcp_server_initialize():
+    server = McpServer()
+    result = await server.handle_message(
+        {"jsonrpc": "2.0", "method": "initialize", "params": {}, "id": 1}
+    )
+    data = json.loads(result)
+    assert data["result"]["serverInfo"]["name"] == "healthy-agent"
+
+
+async def test_mcp_server_tool_roundtrip():
+    server = McpServer()
+
+    async def add_handler(args):
+        return {"sum": args.get("a", 0) + args.get("b", 0)}
+
+    server.register_tool(
+        "add", "Add two numbers",
+        {"type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}}},
+        handler=add_handler,
+    )
+
+    result = await server.handle_message({
+        "jsonrpc": "2.0", "method": "tools/list", "params": {}, "id": 2,
+    })
+    tools = json.loads(result)["result"]["tools"]
+    assert len(tools) == 1
+    assert tools[0]["name"] == "add"
+
+    result = await server.handle_message({
+        "jsonrpc": "2.0", "method": "tools/call",
+        "params": {"name": "add", "arguments": {"a": 3, "b": 7}}, "id": 3,
+    })
+    content = json.loads(json.loads(result)["result"]["content"][0]["text"])
+    assert content["sum"] == 10
+
+
+async def test_mcp_unknown_method():
+    server = McpServer()
+    result = await server.handle_message(
+        {"jsonrpc": "2.0", "method": "unknown", "params": {}, "id": 1}
+    )
+    assert json.loads(result)["error"]["code"] == -32601
+
+
+# --- Skill ---
+
+def test_skill_registry():
+    reg = SkillRegistry()
+    reg.register(SummarizeSkill())
+    reg.register(CodeGenSkill())
+    assert reg.count == 2
+    assert reg.get("summarize") is not None
+    skills = reg.list_skills()
+    assert len(skills) == 2
+
+
+async def test_skill_invoke_mock():
+    reg = SkillRegistry()
+    reg.register(SummarizeSkill())
+    result = await reg.invoke("summarize", {"text": "hello world"}, None, None)
+    assert result.success
+    assert "mock" in result.data
+
+
+async def test_skill_not_found():
+    reg = SkillRegistry()
+    result = await reg.invoke("nonexistent", {}, None, None)
+    assert not result.success
+    assert "not found" in result.error
+
+
+async def test_custom_skill():
+    class UpperSkill(Skill):
+        @property
+        def name(self): return "upper"
+        @property
+        def description(self): return "Uppercase text"
+        @property
+        def parameters(self):
+            return [SkillParam(name="text", type="string", description="Input")]
+
+        async def execute(self, params, process, kernel):
+            return SkillResult(success=True, data=params.get("text", "").upper())
+
+    reg = SkillRegistry()
+    reg.register(UpperSkill())
+    result = await reg.invoke("upper", {"text": "hello"}, None, None)
+    assert result.data == "HELLO"
