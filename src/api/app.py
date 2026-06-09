@@ -329,7 +329,17 @@ def create_app(
                         f"- {e.key}: {e.value}" for e in mem_entries
                     )
 
-                if mode == "agent":
+                use_agent = mode == "agent"
+                if use_agent:
+                    from healthy_agent.agent import AgentLoop
+                    test_agent = AgentLoop(driver, skills)
+                    matched_tools = test_agent._build_tools(prompt)
+                    use_agent = len(matched_tools) > 0 and any(
+                        t["name"] in ("read_file", "write_file", "edit_file", "shell", "python_eval", "search_text", "list_dir")
+                        for t in matched_tools
+                    )
+
+                if use_agent:
                     from healthy_agent.agent import AgentLoop
                     agent = AgentLoop(driver, skills, system_prompt=system_prompt, max_rounds=5)
 
