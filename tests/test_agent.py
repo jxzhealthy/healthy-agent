@@ -1,10 +1,12 @@
 """Tests for executor, RAG, multi-agent, and workflow."""
-from healthy_agent.agent import Executor, RAGMixin, SimpleVectorStore, MultiAgentCoordinator, AgentConfig, Workflow
+from healthy_agent.execution import Executor
+from healthy_agent.retrieval import RAGMixin, SimpleVectorStore
+from healthy_agent.orchestration import MultiAgentCoordinator, AgentConfig, Workflow
 from healthy_agent.kernel.runtime import Kernel
 from healthy_agent.skill import SkillRegistry
 from healthy_agent.skill.base import Skill, SkillParam, SkillResult
 from healthy_agent.drivers.base import LLMDriver, IOResult
-from healthy_agent.agent.reflexion import ReflexionAgent, Evaluation, Reflection, _parse_reflection, _build_reflection_context
+from healthy_agent.strategy.reflexion import ReflexionAgent, Evaluation, Reflection, _parse_reflection, _build_reflection_context
 
 
 # --- Mock driver ---
@@ -198,20 +200,20 @@ def test_rag_tfidf_relevance():
 # --- RAG: text chunking ---
 
 def test_chunk_text_short():
-    from healthy_agent.agent.rag import chunk_text
+    from healthy_agent.retrieval.rag import chunk_text
     chunks = chunk_text("short text", chunk_size=500)
     assert chunks == ["short text"]
 
 
 def test_chunk_text_splits():
-    from healthy_agent.agent.rag import chunk_text
+    from healthy_agent.retrieval.rag import chunk_text
     text = "A" * 200 + "\n\n" + "B" * 200 + "\n\n" + "C" * 200
     chunks = chunk_text(text, chunk_size=250, chunk_overlap=0)
     assert len(chunks) >= 2
 
 
 def test_chunk_text_overlap():
-    from healthy_agent.agent.rag import chunk_text
+    from healthy_agent.retrieval.rag import chunk_text
     text = "word " * 200
     chunks = chunk_text(text, chunk_size=100, chunk_overlap=20)
     assert len(chunks) >= 2
@@ -308,7 +310,7 @@ async def test_workflow_step_timeout():
 # --- LoopWorkflow ---
 
 async def test_loop_workflow():
-    from healthy_agent.agent.workflow import LoopWorkflow
+    from healthy_agent.orchestration.workflow import LoopWorkflow
 
     counter = {"value": 0}
 

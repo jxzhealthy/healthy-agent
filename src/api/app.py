@@ -6,7 +6,11 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+import os
+
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 
 from healthy_agent.kernel.runtime import Kernel
@@ -56,8 +60,26 @@ def create_app(
     app = FastAPI(
         title="Healthy Agent",
         description="CPU-scheduling-inspired OS kernel for LLM agent workloads",
-        version="0.1.0",
+        version="0.2.0",
     )
+
+    # API key auth middleware (skip for web UI and health check)
+    api_key = os.environ.get("HA_API_KEY", "")
+    if api_key:
+        class AuthMiddleware(BaseHTTPMiddleware):
+            async def dispatch(self, request: Request, call_next):
+                path = request.url.path
+                if path in ("/", "/health") or path.startswith("/static"):
+                    return await call_next(request)
+                # WebSocket auth is handled via query param
+                if request.scope.get("type") == "websocket":
+                    return await call_next(request)
+                token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+                if token != api_key:
+                    return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+                return await call_next(request)
+        app.add_middleware(AuthMiddleware)
+        logger.info("API key authentication enabled")
 
     from .web import router as web_router
     app.include_router(web_router)
@@ -65,7 +87,6 @@ def create_app(
     kernel = Kernel(num_cores=num_cores)
     sessions = SessionManager()
     skills = SkillRegistry()
-    import os
     from pathlib import Path
     builtin_skills_dir = Path(__file__).parent.parent.parent / "skills"
     skills.load_directory(builtin_skills_dir)
@@ -308,8 +329,18 @@ def create_app(
         await websocket.accept()
         logger.info("WebSocket connected: session=%s", session_id)
 
+        def _build_history_messages(max_turns: int = 20) -> list[dict]:
+            """Build conversation history from session messages for multi-turn context."""
+            history = session.get_history(last_n=max_turns)
+            messages = []
+            for msg in history:
+                role = msg["role"]
+                if role in ("user", "assistant"):
+                    messages.append({"role": role, "content": msg["content"]})
+            return messages
+
         async def process_message(prompt: str, mode: str, msg_id: str):
-            """Runs as a Kernel process — scheduled on cores, not blocking WebSocket."""
+            """Runs as a Kernel process -- scheduled on cores, not blocking WebSocket."""
             try:
                 if not driver:
                     await websocket.send_json({"type": "done", "content": f"[mock] {prompt}", "msg_id": msg_id})
@@ -322,7 +353,13 @@ def create_app(
                         f"- {e.key}: {e.value}" for e in mem_entries
                     )
 
-                from healthy_agent.agent import Executor
+                # Build multi-turn history (excludes current prompt, already added)
+                history = _build_history_messages(max_turns=20)
+                # Remove the last user message since Executor/driver will add it
+                if history and history[-1]["role"] == "user":
+                    history = history[:-1]
+
+                from healthy_agent.execution import Executor
                 test_executor = Executor(driver, skills)
                 matched_tools = test_executor._build_tools(prompt)
                 use_agent = mode == "agent" and any(
@@ -332,6 +369,14 @@ def create_app(
 
                 if use_agent:
                     executor = Executor(driver, skills, system_prompt=system_prompt, max_rounds=5)
+                    # Pass history as context string for Executor
+                    context = ""
+                    if history:
+                        context_parts = []
+                        for msg in history[-10:]:  # Last 10 turns for context window
+                            prefix = "User" if msg["role"] == "user" else "Assistant"
+                            context_parts.append(f"{prefix}: {msg['content']}")
+                        context = "Previous conversation:\n" + "\n".join(context_parts)
 
                     async def on_step(step):
                         if step.role == "tool":
@@ -344,13 +389,16 @@ def create_app(
                         elif step.role == "assistant" and step.content:
                             await websocket.send_json({"type": "stream", "content": step.content, "msg_id": msg_id})
 
-                    agent_result = await executor.run(prompt, on_step=on_step)
+                    agent_result = await executor.run(prompt, context=context, on_step=on_step)
                     text = agent_result.answer
                 else:
+                    # Non-agent mode: pass full history as messages array
+                    messages = list(history)
+                    messages.append({"role": "user", "content": prompt})
                     try:
                         chunks = []
                         async for chunk in driver.stream(
-                            [{"role": "user", "content": prompt}],
+                            messages,
                             system=system_prompt,
                         ):
                             chunks.append(chunk)
@@ -358,7 +406,7 @@ def create_app(
                         text = "".join(chunks)
                     except Exception:
                         gen_result = await driver.generate(
-                            [{"role": "user", "content": prompt}],
+                            messages,
                             system=system_prompt,
                         )
                         text = gen_result.data["text"].strip() if gen_result.success else f"ERROR: {gen_result.error}"
@@ -395,7 +443,6 @@ def create_app(
 
 def app_instance() -> FastAPI:
     """Factory for uvicorn reload mode. Reads config from env vars."""
-    import os
     return create_app(
         num_cores=int(os.environ.get("HA_CORES", "4")),
         driver_name=os.environ.get("HA_DRIVER", "mock"),

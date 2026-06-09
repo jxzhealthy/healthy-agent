@@ -7,7 +7,7 @@ from typing import Any, Callable, Coroutine
 from ..kernel.runtime import Kernel
 from ..syscall import fork, wait
 
-logger = logging.getLogger("healthy_agent.multi_agent")
+logger = logging.getLogger("healthy_agent.orchestration.multi")
 
 
 @dataclass

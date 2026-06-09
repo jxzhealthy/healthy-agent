@@ -7,7 +7,7 @@ from typing import Any
 from ..drivers.base import LLMDriver
 from ..skill.registry import SkillRegistry
 
-logger = logging.getLogger("healthy_agent.agent")
+logger = logging.getLogger("healthy_agent.execution")
 
 
 @dataclass

@@ -12,8 +12,28 @@ from .core import Core
 logger = logging.getLogger("healthy_agent.kernel")
 
 
+class ResourceError(RuntimeError):
+    """Raised when a kernel resource limit is exceeded."""
+    pass
+
+
 class Kernel:
-    def __init__(self, num_cores: int = 4, boost_interval: float = 30.0):
+    def __init__(
+        self,
+        num_cores: int = 4,
+        boost_interval: float = 30.0,
+        max_processes: int = 1000,
+        max_spawn_rate: float = 100.0,
+    ):
+        """Initialize the Kernel.
+
+        Args:
+            num_cores: Number of concurrent execution cores.
+            boost_interval: MLFQ priority boost interval in seconds.
+            max_processes: Maximum number of live processes (non-terminated).
+                           Spawn will raise if exceeded.
+            max_spawn_rate: Maximum spawns per second (rate limiting).
+        """
         self.scheduler = MLFQScheduler(boost_interval=boost_interval)
         self.num_cores = num_cores
         self.cores: list[Core] = [Core(i, self) for i in range(num_cores)]
@@ -25,6 +45,10 @@ class Kernel:
         self._reap_queue: list[tuple[float, int]] = []
         self._reap_ttl = 60.0
         self._start_time = time.monotonic()
+        # Resource limits
+        self._max_processes = max_processes
+        self._max_spawn_rate = max_spawn_rate
+        self._spawn_timestamps: list[float] = []
 
     def spawn(
         self,
@@ -34,6 +58,31 @@ class Kernel:
         parent_pid: int | None = None,
         preemptible: bool = True,
     ) -> int:
+        # Resource limit: max processes
+        active_count = sum(
+            1 for p in self.process_table.values()
+            if p.state != ProcessState.TERMINATED
+        )
+        if active_count >= self._max_processes:
+            self.reap()  # Try reaping first
+            active_count = sum(
+                1 for p in self.process_table.values()
+                if p.state != ProcessState.TERMINATED
+            )
+            if active_count >= self._max_processes:
+                raise ResourceError(
+                    f"Max processes exceeded: {active_count}/{self._max_processes}"
+                )
+
+        # Resource limit: spawn rate
+        now = time.monotonic()
+        self._spawn_timestamps = [t for t in self._spawn_timestamps if now - t < 1.0]
+        if len(self._spawn_timestamps) >= self._max_spawn_rate:
+            raise ResourceError(
+                f"Spawn rate exceeded: {len(self._spawn_timestamps)}/{self._max_spawn_rate} per second"
+            )
+        self._spawn_timestamps.append(now)
+
         self._pid_counter += 1
         pid = self._pid_counter
         process = Process(pid, task_type, payload, handler=handler, parent_pid=parent_pid)

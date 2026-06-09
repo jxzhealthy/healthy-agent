@@ -8,7 +8,7 @@ Demonstrates:
   - Progressive skill routing via TF-IDF
 """
 import asyncio
-from healthy_agent.agent import Executor
+from healthy_agent.execution import Executor
 from healthy_agent.skill import SkillRegistry
 from healthy_agent.skill.base import Skill, SkillParam, SkillResult
 from healthy_agent.drivers.base import LLMDriver, IOResult

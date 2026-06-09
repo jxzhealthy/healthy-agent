@@ -12,7 +12,7 @@ This example uses a mock driver that simulates:
   Trial 2: Gets reflection context -> generates correct code -> passes
 """
 import asyncio
-from healthy_agent.agent import ReflexionAgent, Evaluation
+from healthy_agent.strategy import ReflexionAgent, Evaluation
 from healthy_agent.skill import SkillRegistry
 from healthy_agent.drivers.base import LLMDriver, IOResult
 

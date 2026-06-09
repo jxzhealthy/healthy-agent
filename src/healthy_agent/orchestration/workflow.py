@@ -8,7 +8,7 @@ from typing import Any, Callable, Coroutine
 from ..kernel.runtime import Kernel
 from ..syscall import fork, wait
 
-logger = logging.getLogger("healthy_agent.workflow")
+logger = logging.getLogger("healthy_agent.orchestration.workflow")
 
 
 @dataclass

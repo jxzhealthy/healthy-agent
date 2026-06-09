@@ -11,7 +11,7 @@ import asyncio
 import json
 
 from healthy_agent.kernel.runtime import Kernel
-from healthy_agent.agent import MultiAgentCoordinator, AgentConfig
+from healthy_agent.orchestration import MultiAgentCoordinator, AgentConfig
 from healthy_agent.ipc import Message, BroadcastChannel
 from healthy_agent.mcp.server import McpServer
 

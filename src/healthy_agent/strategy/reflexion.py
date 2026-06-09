@@ -27,9 +27,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine
 
-from .executor import Executor, AgentResult
+from ..execution.executor import Executor, AgentResult
 
-logger = logging.getLogger("healthy_agent.reflexion")
+logger = logging.getLogger("healthy_agent.strategy.reflexion")
 
 
 @dataclass

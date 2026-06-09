@@ -11,6 +11,9 @@ HTML_PAGE = """
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Healthy Agent</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
@@ -38,7 +41,18 @@ button.secondary:hover { background: #475569; }
 .msg.user .avatar { background: #0ea5e9; }
 .msg.assistant .avatar { background: #8b5cf6; }
 .msg.system .avatar { background: #334155; }
-.msg .content { background: #334155; padding: 12px 16px; border-radius: 12px; font-size: 14px; line-height: 1.6; max-width: 80%; white-space: pre-wrap; word-break: break-word; }
+.msg .content { background: #334155; padding: 12px 16px; border-radius: 12px; font-size: 14px; line-height: 1.6; max-width: 80%; word-break: break-word; }
+.msg .content pre { background: #0f172a; border-radius: 8px; padding: 12px; overflow-x: auto; margin: 8px 0; }
+.msg .content code { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; }
+.msg .content :not(pre) > code { background: #0f172a; padding: 2px 6px; border-radius: 4px; }
+.msg .content p { margin: 4px 0; }
+.msg .content ul, .msg .content ol { margin: 4px 0; padding-left: 20px; }
+.msg .content h1, .msg .content h2, .msg .content h3 { margin: 8px 0 4px; color: #38bdf8; }
+.msg .content blockquote { border-left: 3px solid #0ea5e9; padding-left: 12px; margin: 8px 0; color: #94a3b8; }
+.msg .content table { border-collapse: collapse; margin: 8px 0; }
+.msg .content th, .msg .content td { border: 1px solid #475569; padding: 6px 10px; }
+.msg .content th { background: #1e293b; }
+.msg.user .content { white-space: pre-wrap; }
 .msg.user .content { background: #0c4a6e; border-radius: 12px 2px 12px 12px; }
 .msg.assistant .content { border-radius: 2px 12px 12px 12px; }
 .input-area { display: flex; gap: 8px; padding-top: 16px; border-top: 1px solid #334155; }
@@ -166,7 +180,7 @@ async function loadMessages() {
   el.innerHTML = d.messages.map(m => `
     <div class="msg ${m.role}">
       <div class="avatar">${m.role === 'user' ? 'U' : m.role === 'assistant' ? 'A' : 'S'}</div>
-      <div class="content">${escHtml(m.content)}</div>
+      <div class="content">${m.role === 'assistant' ? renderMarkdown(m.content) : escHtml(m.content)}</div>
     </div>
   `).join('');
   el.scrollTop = el.scrollHeight;
@@ -270,7 +284,7 @@ function handleWsMessage(sid, msg) {
   } else if (msg.type === 'done') {
     if (pending[id]) {
       const el = document.getElementById(pending[id].elId);
-      if (el) el.querySelector('.content').textContent = msg.content;
+      if (el) el.querySelector('.content').innerHTML = renderMarkdown(msg.content);
       delete pending[id];
     } else {
       appendMsg('assistant', msg.content);
@@ -310,6 +324,24 @@ async function sendMessage() {
   conn.send(JSON.stringify({ prompt, mode: 'agent' }));
 }
 
+function renderMarkdown(text) {
+  if (typeof marked !== 'undefined') {
+    try {
+      marked.setOptions({
+        highlight: function(code, lang) {
+          if (typeof hljs !== 'undefined' && lang && hljs.getLanguage(lang)) {
+            return hljs.highlight(code, {language: lang}).value;
+          }
+          return typeof hljs !== 'undefined' ? hljs.highlightAuto(code).value : code;
+        },
+        breaks: true
+      });
+      return marked.parse(text);
+    } catch(e) { return escHtml(text); }
+  }
+  return escHtml(text);
+}
+
 function appendMsg(role, content) {
   const el = document.getElementById('messages');
   if (el.querySelector('.empty')) el.innerHTML = '';
@@ -317,9 +349,10 @@ function appendMsg(role, content) {
   const div = document.createElement('div');
   div.className = `msg ${role}`;
   div.id = id;
+  const rendered = (role === 'assistant') ? renderMarkdown(content) : escHtml(content);
   div.innerHTML = `
     <div class="avatar">${role === 'user' ? 'U' : role === 'assistant' ? 'A' : 'S'}</div>
-    <div class="content">${content}</div>
+    <div class="content">${rendered}</div>
   `;
   el.appendChild(div);
   el.scrollTop = el.scrollHeight;
