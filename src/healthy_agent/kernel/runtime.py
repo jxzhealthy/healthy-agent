@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Any, Callable, Coroutine
 
 from .process import Process, ProcessState
 from .scheduler import MLFQScheduler
 from .core import Core
+
+logger = logging.getLogger("healthy_agent.kernel")
 
 
 class Kernel:
@@ -40,9 +43,11 @@ class Kernel:
         self.scheduler.admit(process)
         if not preemptible:
             process.pcb.time_slice = float("inf")
+        logger.debug("spawn pid=%d type=%s parent=%s preemptible=%s", pid, task_type, parent_pid, preemptible)
         return pid
 
     async def run(self) -> None:
+        logger.info("Kernel starting with %d cores", self.num_cores)
         self._shutdown.clear()
         tasks = [asyncio.create_task(core.run_loop()) for core in self.cores]
         await self._shutdown.wait()
@@ -74,6 +79,10 @@ class Kernel:
     def _complete(self, process: Process, result: Any) -> None:
         process.pcb.state = ProcessState.TERMINATED
         process.pcb.result = result
+        if isinstance(result, Exception):
+            logger.warning("pid=%d type=%s terminated with error: %s", process.pid, process.task_type, result)
+        else:
+            logger.debug("pid=%d type=%s terminated cpu=%.4fs", process.pid, process.task_type, process.pcb.cpu_time)
         self._get_event(process.pid).set()
         waiter_pid = self._waiters.pop(process.pid, None)
         if waiter_pid is not None:
@@ -89,6 +98,7 @@ class Kernel:
         self.scheduler.unblock(process)
 
     def shutdown(self) -> None:
+        logger.info("Kernel shutting down, %d processes total", len(self.process_table))
         self._shutdown.set()
 
     def ps(self) -> list[dict]:

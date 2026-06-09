@@ -6,6 +6,7 @@ Usage:
     python src/main.py --port 8000 --cores 4 --driver anthropic --model claude-opus-4-6
 """
 import argparse
+import logging
 import sys
 import os
 
@@ -21,14 +22,18 @@ def main():
     parser.add_argument("--cores", "-c", type=int, default=4)
     parser.add_argument("--driver", "-d", default="mock", choices=["mock", "anthropic", "openai", "deepseek", "zhipu", "ollama"])
     parser.add_argument("--model", "-m", default=None)
+    parser.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s [%(name)s] %(levelname)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
     import uvicorn
     app = create_app(num_cores=args.cores, driver_name=args.driver, model=args.model)
-    print(f"Healthy Agent starting on {args.host}:{args.port}")
-    print(f"  Kernel: {args.cores} cores | Driver: {args.driver} | Model: {args.model or 'default'}")
-    print(f"  API docs: http://localhost:{args.port}/docs")
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    uvicorn.run(app, host=args.host, port=args.port, log_level=args.log_level.lower())
 
 
 if __name__ == "__main__":

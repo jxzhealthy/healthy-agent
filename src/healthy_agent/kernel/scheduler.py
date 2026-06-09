@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 import time
 from collections import deque
 from dataclasses import dataclass
 
 from .process import Process, ProcessState
+
+logger = logging.getLogger("healthy_agent.scheduler")
 
 DEFAULT_TIME_SLICES = [0.5, 2.0, 10.0, float("inf")]
 
@@ -48,12 +51,14 @@ class MLFQScheduler:
         return None
 
     def preempt(self, process: Process) -> None:
-        level = min(process.pcb.priority + 1, self.num_levels - 1)
+        old_level = process.pcb.priority
+        level = min(old_level + 1, self.num_levels - 1)
         process.pcb.priority = level
         process.pcb.time_slice = self.time_slices[level]
         process.pcb.state = ProcessState.READY
         self.queues[level].append(process)
         self._stats["preempted"] += 1
+        logger.debug("preempt pid=%d Q%d→Q%d", process.pcb.pid, old_level, level)
 
     def unblock(self, process: Process) -> None:
         level = process.pcb.priority
@@ -62,6 +67,9 @@ class MLFQScheduler:
         self.queues[level].append(process)
 
     def boost(self) -> None:
+        boosted = sum(len(self.queues[i]) for i in range(1, self.num_levels))
+        if boosted:
+            logger.info("boost: %d processes promoted to Q0", boosted)
         for level in range(1, self.num_levels):
             while self.queues[level]:
                 p = self.queues[level].popleft()

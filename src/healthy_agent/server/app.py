@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import uuid
 from typing import Any
@@ -12,6 +13,8 @@ from ..kernel.runtime import Kernel
 from ..session import SessionManager
 from ..skill import SkillRegistry
 from ..skill.builtin import SummarizeSkill, CodeGenSkill
+
+logger = logging.getLogger("healthy_agent.server")
 
 
 # ── Request/Response Models ──────────────────────────────────
@@ -68,6 +71,7 @@ def create_app(
     @app.on_event("startup")
     async def startup():
         nonlocal driver
+        logger.info("Starting Healthy Agent server: cores=%d driver=%s", num_cores, driver_name)
         if driver_name == "anthropic":
             from ..drivers.anthropic import AnthropicDriver
             driver = AnthropicDriver(model=model or "claude-sonnet-4-20250514")
@@ -98,6 +102,7 @@ def create_app(
     @app.post("/sessions")
     async def create_session(req: CreateSessionRequest):
         session = sessions.create(metadata=req.metadata)
+        logger.info("Session created: %s meta=%s", session.session_id, req.metadata)
         return {"session_id": session.session_id, **session.to_dict()}
 
     @app.get("/sessions")
@@ -125,6 +130,7 @@ def create_app(
             raise HTTPException(404, "Session not found")
 
         task_id = uuid.uuid4().hex[:8]
+        logger.info("Task submitted: %s session=%s type=%s", task_id, session_id, req.task_type)
         task_results[task_id] = {"status": "running", "session_id": session_id, "submitted_at": time.time()}
 
         async def task_handler(process, k):

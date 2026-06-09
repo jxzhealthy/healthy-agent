@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import TYPE_CHECKING
 
 from .process import Process, BlockedError
+
+logger = logging.getLogger("healthy_agent.core")
 
 if TYPE_CHECKING:
     from .runtime import Kernel
@@ -34,6 +37,7 @@ class Core:
 
             self.current = process
             exec_start = time.monotonic()
+            logger.debug("core=%d dispatch pid=%d type=%s pri=%d", self.core_id, process.pid, process.task_type, process.pcb.priority)
 
             try:
                 ts = process.pcb.time_slice
@@ -49,6 +53,7 @@ class Core:
 
             except asyncio.TimeoutError:
                 process.pcb.cpu_time += time.monotonic() - exec_start
+                logger.debug("core=%d preempt pid=%d (time slice expired)", self.core_id, process.pid)
                 self._kernel.scheduler.preempt(process)
 
             except BlockedError:
@@ -56,6 +61,7 @@ class Core:
 
             except Exception as e:
                 process.pcb.cpu_time += time.monotonic() - exec_start
+                logger.error("core=%d pid=%d exception: %s", self.core_id, process.pid, e)
                 self._kernel._complete(process, e)
                 self.total_executed += 1
 
