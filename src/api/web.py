@@ -173,8 +173,7 @@ async function sendMessage() {
   const prompt = input.value.trim();
   if (!prompt) return;
   input.value = '';
-  input.disabled = true;
-  document.getElementById('sendBtn').disabled = true;
+  input.focus();
 
   // Show user message immediately
   appendMsg('user', prompt);
@@ -188,7 +187,7 @@ async function sendMessage() {
     payload: { prompt }
   });
 
-  // Poll for result
+  // Poll for result (input stays enabled, user can send more)
   const taskId = task.task_id;
   const poll = setInterval(async () => {
     try {
@@ -197,9 +196,6 @@ async function sendMessage() {
         clearInterval(poll);
         removeMsg(loadingId);
         appendMsg('assistant', r.result || r.status);
-        input.disabled = false;
-        document.getElementById('sendBtn').disabled = false;
-        input.focus();
         refreshKernel();
         refreshSessions();
       }
@@ -207,8 +203,6 @@ async function sendMessage() {
       clearInterval(poll);
       removeMsg(loadingId);
       appendMsg('system', 'Request failed: ' + e.message);
-      input.disabled = false;
-      document.getElementById('sendBtn').disabled = false;
     }
   }, 500);
 }
