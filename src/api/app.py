@@ -143,19 +143,34 @@ def create_app(
             payload = process.payload
             if driver and payload.get("prompt"):
                 from healthy_agent.syscall import io
-                session.add_message("user", payload["prompt"])
-                history = [
+                prompt = payload["prompt"]
+                session.add_message("user", prompt)
+
+                memory_context = ""
+                mem_entries = session.memory.all()
+                if mem_entries:
+                    memory_context = "Relevant memory:\n" + "\n".join(
+                        f"- {e.key}: {e.value}" for e in mem_entries
+                    )
+
+                recent = session.get_history(last_n=6)
+                messages = [
                     {"role": m["role"], "content": m["content"]}
-                    for m in session.get_history()
+                    for m in recent
                     if m["role"] in ("user", "assistant")
                 ]
+
+                system_prompt = payload.get("system", "You are a helpful assistant.")
+                if memory_context:
+                    system_prompt += f"\n\n{memory_context}"
+
                 result = await io(k, process, driver.generate(
-                    history,
-                    system=payload.get("system", "You are a helpful assistant."),
+                    messages,
+                    system=system_prompt,
                 ))
                 text = result.data["text"].strip() if result.success else f"ERROR: {result.error}"
                 session.add_message("assistant", text)
-                session.mem.remember(f"task:{task_id}", text)
+                session.memory.put("last_reply", text, tags=["reply"])
                 return text
             return f"[mock] {payload}"
 
