@@ -33,12 +33,14 @@ button.secondary:hover { background: #475569; }
 .chat-area { display: flex; flex-direction: column; height: calc(100vh - 120px); }
 .messages { flex: 1; overflow-y: auto; padding: 16px 0; }
 .msg { margin-bottom: 16px; display: flex; gap: 12px; }
+.msg.user { flex-direction: row-reverse; }
 .msg .avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
 .msg.user .avatar { background: #0ea5e9; }
 .msg.assistant .avatar { background: #8b5cf6; }
 .msg.system .avatar { background: #334155; }
 .msg .content { background: #334155; padding: 12px 16px; border-radius: 12px; font-size: 14px; line-height: 1.6; max-width: 80%; white-space: pre-wrap; word-break: break-word; }
-.msg.user .content { background: #0c4a6e; }
+.msg.user .content { background: #0c4a6e; border-radius: 12px 2px 12px 12px; }
+.msg.assistant .content { border-radius: 2px 12px 12px 12px; }
 .input-area { display: flex; gap: 8px; padding-top: 16px; border-top: 1px solid #334155; }
 .input-area input { flex: 1; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; padding: 12px 16px; border-radius: 8px; font-size: 14px; outline: none; }
 .input-area input:focus { border-color: #0ea5e9; }
