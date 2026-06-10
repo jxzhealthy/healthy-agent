@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import importlib.util
 import inspect
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from .base import Tool, Skill, SkillResult
 
@@ -17,10 +18,13 @@ logger = logging.getLogger("healthy_agent.skill")
 
 
 class SkillRegistry:
-    """Manages loadable skills — supports auto-discovery from directory."""
+    """Manages loadable skills — supports auto-discovery and hot-reload from directory."""
 
     def __init__(self):
         self._skills: dict[str, Tool] = {}
+        self._watched_dirs: list[Path] = []
+        self._watcher_task: Any = None
+        self._file_mtimes: dict[str, float] = {}
 
     def register(self, skill: Tool) -> None:
         self._skills[skill.name] = skill
@@ -96,7 +100,60 @@ class SkillRegistry:
                 logger.warning("Failed to load %s: %s", md_file.name, e)
 
         logger.info("Loaded %d skills from %s", loaded, directory)
+        # Track for hot-reload
+        self._watched_dirs.append(directory)
+        for f in list(directory.glob("*.py")) + list(directory.glob("*.md")):
+            if not f.name.startswith("_"):
+                self._file_mtimes[str(f)] = f.stat().st_mtime
         return loaded
+
+    def start_watcher(self, poll_interval: float = 2.0) -> None:
+        """Start background file watcher for hot-reload. Call from async context."""
+        if self._watcher_task is not None:
+            return
+
+        async def _watch():
+            while True:
+                await asyncio.sleep(poll_interval)
+                self._check_reload()
+
+        try:
+            loop = asyncio.get_running_loop()
+            self._watcher_task = loop.create_task(_watch())
+            logger.info("Skill hot-reload watcher started (poll=%.1fs)", poll_interval)
+        except RuntimeError:
+            logger.debug("No running loop, hot-reload disabled")
+
+    def stop_watcher(self) -> None:
+        """Stop the file watcher."""
+        if self._watcher_task:
+            self._watcher_task.cancel()
+            self._watcher_task = None
+
+    def _check_reload(self) -> None:
+        """Check watched directories for changes and reload if needed."""
+        changed = False
+        for directory in self._watched_dirs:
+            for f in list(directory.glob("*.py")) + list(directory.glob("*.md")):
+                if f.name.startswith("_"):
+                    continue
+                key = str(f)
+                try:
+                    mtime = f.stat().st_mtime
+                except OSError:
+                    continue
+                if key not in self._file_mtimes or self._file_mtimes[key] < mtime:
+                    self._file_mtimes[key] = mtime
+                    changed = True
+
+        if changed:
+            logger.info("Skill file changes detected, reloading...")
+            old_skills = dict(self._skills)
+            self._skills.clear()
+            for directory in self._watched_dirs:
+                self.load_directory(directory)
+            new_count = len(self._skills)
+            logger.info("Hot-reload complete: %d skills (was %d)", new_count, len(old_skills))
 
     def _load_md_skill(self, path: Path) -> Skill | None:
         """Load a skill from a markdown file with YAML frontmatter."""

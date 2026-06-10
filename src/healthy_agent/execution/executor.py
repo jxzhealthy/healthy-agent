@@ -6,6 +6,7 @@ from typing import Any
 
 from ..drivers.base import LLMDriver
 from ..skill.registry import SkillRegistry
+from ..observability.metrics import metrics
 
 logger = logging.getLogger("healthy_agent.execution")
 
@@ -152,6 +153,10 @@ class Executor:
         context: str = "",
         on_step: Any = None,
     ) -> AgentResult:
+        import time as _time
+        _start = _time.monotonic()
+        metrics.increment("executor.runs")
+
         tools = self._build_tools(prompt)
         messages = []
         if context:
@@ -169,8 +174,11 @@ class Executor:
                 tools=tools if tools else None,
             )
             tokens += result.tokens_used
+            metrics.increment("llm.calls", tags={"driver": self.driver.name})
 
             if not result.success:
+                metrics.increment("executor.errors")
+                metrics.record_latency("executor.run", _time.monotonic() - _start)
                 return AgentResult(answer=f"ERROR: {result.error}", steps=steps, total_rounds=round_num, tokens_used=tokens)
 
             text = result.data.get("text", "")
@@ -185,6 +193,9 @@ class Executor:
                         await r
 
             if not tool_calls or stop_reason != "tool_use":
+                metrics.increment("executor.success")
+                metrics.increment("tokens.total", tokens)
+                metrics.record_latency("executor.run", _time.monotonic() - _start)
                 return AgentResult(answer=text, steps=steps, total_rounds=round_num, tokens_used=tokens)
 
             assistant_content = []
@@ -219,6 +230,114 @@ class Executor:
                     "content": step.tool_result,
                 })
 
+            messages.append({"role": "user", "content": tool_results})
+
+        return AgentResult(answer="Max rounds reached", steps=steps, total_rounds=self.max_rounds, tokens_used=tokens)
+
+    async def run_stream(
+        self,
+        prompt: str,
+        *,
+        context: str = "",
+        on_token: Any = None,
+        on_step: Any = None,
+    ) -> AgentResult:
+        """Stream-enabled execution: yields tokens as they arrive.
+
+        Args:
+            prompt: User prompt.
+            context: Optional context from conversation history.
+            on_token: Async callback(chunk: str) called for each text token.
+            on_step: Async callback(step: AgentStep) called after tool calls.
+
+        The final answer is still returned as AgentResult.
+        For the first non-tool-call response, uses driver.stream() for token-level output.
+        During tool-call loops, falls back to generate() since tools need complete JSON.
+        """
+        tools = self._build_tools(prompt)
+        messages = []
+        if context:
+            messages.append({"role": "user", "content": context})
+            messages.append({"role": "assistant", "content": "Understood."})
+        messages.append({"role": "user", "content": prompt})
+
+        steps: list[AgentStep] = []
+        tokens = 0
+
+        for round_num in range(1, self.max_rounds + 1):
+            # First try streaming for pure text responses
+            if round_num == 1 or not tools:
+                try:
+                    chunks = []
+                    async for chunk in self.driver.stream(messages, system=self.system_prompt, tools=tools or None):
+                        chunks.append(chunk)
+                        if on_token:
+                            r = on_token(chunk)
+                            if hasattr(r, '__await__'):
+                                await r
+                    text = "".join(chunks)
+                    tokens += max(len(text) // 4, 1)  # rough estimate
+
+                    # If no tool calls indicated, return
+                    if text and not text.strip().startswith('{"tool_'):
+                        steps.append(AgentStep(role="assistant", content=text))
+                        return AgentResult(answer=text, steps=steps, total_rounds=round_num, tokens_used=tokens)
+                except (NotImplementedError, TypeError, StopAsyncIteration):
+                    pass  # Fall through to generate()
+
+            # Fall back to generate for tool-calling rounds
+            result = await self.driver.generate(
+                messages,
+                system=self.system_prompt,
+                tools=tools if tools else None,
+            )
+            tokens += result.tokens_used
+
+            if not result.success:
+                return AgentResult(answer=f"ERROR: {result.error}", steps=steps, total_rounds=round_num, tokens_used=tokens)
+
+            text = result.data.get("text", "")
+            tool_calls = result.data.get("tool_calls", [])
+            stop_reason = result.data.get("stop_reason", "")
+
+            if text:
+                steps.append(AgentStep(role="assistant", content=text))
+                if on_token:
+                    r = on_token(text)
+                    if hasattr(r, '__await__'):
+                        await r
+
+            if not tool_calls or stop_reason != "tool_use":
+                return AgentResult(answer=text, steps=steps, total_rounds=round_num, tokens_used=tokens)
+
+            # Tool call handling (same as run())
+            assistant_content = []
+            if text:
+                assistant_content.append({"type": "text", "text": text})
+            for tc in tool_calls:
+                assistant_content.append({
+                    "type": "tool_use",
+                    "id": tc["id"],
+                    "name": tc["name"],
+                    "input": tc["input"],
+                })
+            messages.append({"role": "assistant", "content": assistant_content})
+
+            tool_results = []
+            for tc in tool_calls:
+                step = AgentStep(role="tool", tool_name=tc["name"], tool_input=tc["input"])
+                skill_result = await self.skills.invoke(tc["name"], tc["input"], None, None)
+                step.tool_result = str(skill_result.data) if skill_result.success else f"ERROR: {skill_result.error}"
+                steps.append(step)
+                if on_step:
+                    r = on_step(step)
+                    if hasattr(r, '__await__'):
+                        await r
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": tc["id"],
+                    "content": step.tool_result,
+                })
             messages.append({"role": "user", "content": tool_results})
 
         return AgentResult(answer="Max rounds reached", steps=steps, total_rounds=self.max_rounds, tokens_used=tokens)

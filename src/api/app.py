@@ -135,6 +135,12 @@ def create_app(
     async def shutdown():
         kernel.shutdown()
 
+    @app.get("/metrics")
+    async def get_metrics():
+        """Return current metrics snapshot."""
+        from healthy_agent.observability.metrics import metrics
+        return metrics.snapshot()
+
     # ── Session endpoints ────────────────────────────────────
 
     @app.post("/sessions")
@@ -427,6 +433,10 @@ def create_app(
 
                 msg_id = uuid.uuid4().hex[:8]
                 session.add_message("user", prompt)
+
+                from healthy_agent.observability.metrics import metrics as _metrics
+                _metrics.increment("ws.messages", tags={"mode": mode})
+
                 await websocket.send_json({"type": "thinking", "msg_id": msg_id})
 
                 async def _kernel_handler(process, k):

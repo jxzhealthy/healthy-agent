@@ -8,6 +8,7 @@ from typing import Any, Callable, Coroutine
 from .process import Process, ProcessState
 from .scheduler import MLFQScheduler
 from .core import Core
+from ..observability.metrics import metrics
 
 logger = logging.getLogger("healthy_agent.kernel")
 
@@ -94,6 +95,10 @@ class Kernel:
         self.scheduler.admit(process)
         if not preemptible:
             process.pcb.time_slice = float("inf")
+        metrics.increment("kernel.spawns", tags={"type": task_type})
+        metrics.gauge("kernel.active_processes", sum(
+            1 for p in self.process_table.values() if p.state != ProcessState.TERMINATED
+        ))
         logger.debug("spawn pid=%d type=%s parent=%s preemptible=%s", pid, task_type, parent_pid, preemptible)
         return pid
 
@@ -131,7 +136,10 @@ class Kernel:
     def _complete(self, process: Process, result: Any) -> None:
         process.pcb.state = ProcessState.TERMINATED
         process.pcb.result = result
+        metrics.increment("kernel.completed", tags={"type": process.task_type})
+        metrics.record_latency("kernel.process_cpu", process.pcb.cpu_time, tags={"type": process.task_type})
         if isinstance(result, Exception):
+            metrics.increment("kernel.errors")
             logger.warning("pid=%d type=%s terminated with error: %s", process.pid, process.task_type, result)
         else:
             logger.debug("pid=%d type=%s terminated cpu=%.4fs", process.pid, process.task_type, process.pcb.cpu_time)

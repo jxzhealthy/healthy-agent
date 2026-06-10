@@ -81,6 +81,65 @@ def run(task: str, cores: int, driver: str, verbose: bool):
 
 
 @main.command()
+@click.option("--driver", "-d", default="mock", help="LLM driver")
+@click.option("--model", "-m", default=None, help="Model name")
+@click.option("--system", "-s", default=None, help="System prompt")
+def chat(driver: str, model: str | None, system: str | None):
+    """Interactive chat mode (terminal REPL)."""
+
+    async def _chat():
+        drv = _make_driver(driver)
+        if not drv:
+            click.echo("Driver 'mock' does not support chat. Use --driver anthropic/deepseek/etc.")
+            return
+
+        sys_prompt = system or "You are a helpful assistant."
+        messages: list[dict] = []
+        click.echo(f"Healthy Agent Chat | Driver: {driver} | Model: {model or 'default'}")
+        click.echo("Type 'exit' or Ctrl+C to quit. Type '/clear' to reset.\n")
+
+        while True:
+            try:
+                user_input = click.prompt(click.style("You", fg="cyan"), prompt_suffix="> ")
+            except (EOFError, click.Abort):
+                click.echo("\nBye!")
+                break
+
+            if not user_input.strip():
+                continue
+            if user_input.strip().lower() in ("exit", "quit", "/exit"):
+                click.echo("Bye!")
+                break
+            if user_input.strip() == "/clear":
+                messages.clear()
+                click.echo("(conversation cleared)")
+                continue
+
+            messages.append({"role": "user", "content": user_input})
+
+            try:
+                chunks = []
+                click.echo(click.style("Assistant", fg="green") + "> ", nl=False)
+                async for chunk in drv.stream(messages, system=sys_prompt):
+                    click.echo(chunk, nl=False)
+                    chunks.append(chunk)
+                click.echo()  # newline after stream
+                full_response = "".join(chunks)
+                messages.append({"role": "assistant", "content": full_response})
+            except Exception:
+                # Fallback to non-streaming
+                result = await drv.generate(messages, system=sys_prompt)
+                if result.success:
+                    text = result.data.get("text", "")
+                    click.echo(click.style("Assistant", fg="green") + f"> {text}")
+                    messages.append({"role": "assistant", "content": text})
+                else:
+                    click.echo(click.style(f"Error: {result.error}", fg="red"))
+
+    asyncio.run(_chat())
+
+
+@main.command()
 @click.option("--cores", "-c", default=4)
 def ps(cores: int):
     """Show kernel process table (demo)."""
