@@ -116,6 +116,10 @@ healthy-agent run "Write a function" --driver anthropic --cores 4
 # With DeepSeek / Qwen / Ollama / Zhipu / OpenAI
 healthy-agent run "Explain async" --driver deepseek
 healthy-agent run "解释量子计算" --driver qwen
+
+# Interactive chat (REPL mode with streaming)
+healthy-agent chat --driver anthropic
+healthy-agent chat --driver deepseek --model deepseek-chat
 ```
 
 ### Web Server + WebSocket
@@ -158,11 +162,19 @@ ws.send(JSON.stringify({ prompt: "Hello!", mode: "agent" }));
 ├──────────────────────────────────────────────────────────────┤
 │                    Skills & Tools                            │
 │  file_tools │ shell_tools │ python_eval │ LLM skills         │
+│  Hot-reload (file watcher) │ Plugin-registered skills        │
 ├──────────────────────────────────────────────────────────────┤
 │          Memory          │           IPC / MCP               │
 │  Short-term │ Long-term  │  Channel │ McpServer │ McpClient  │
 │  (RAM/TTL)  │ (Disk/     │  (async  │ (JSON-RPC │ (connect   │
 │             │  Redis/Mem0)│  msgs)   │  stdio)   │  external)│
+├──────────────────────────────────────────────────────────────┤
+│       Persistence        │        Observability              │
+│  SQLiteStore (WAL mode)  │  MetricsCollector │ Structured    │
+│  sessions + memory       │  counters/latency │ JSON logging  │
+├──────────────────────────────────────────────────────────────┤
+│                        Plugins                               │
+│  Plugin base │ PluginManager │ Lifecycle hooks │ Entry points │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -286,6 +298,75 @@ Built-in LLM skills: `summarize`, `code_gen`, `web_search`
 
 Custom skills are loaded from any directory via `SkillRegistry.load_directory()`.
 
+Skills support **hot-reload** — start the file watcher and any changes to skill files are automatically picked up:
+
+```python
+registry = SkillRegistry()
+registry.load_directory("./skills")
+registry.start_watcher(poll_interval=2.0)  # polls every 2s for file changes
+```
+
+## Persistence
+
+SQLite-based persistence for sessions and memory (WAL mode for concurrent reads):
+
+```python
+from healthy_agent.persistence import SQLiteStore
+
+store = SQLiteStore("./data/agent.db")
+store.save_session("sess-1", messages=[...], metadata={...})
+session = store.load_session("sess-1")
+
+store.put_memory("sess-1", "user_pref", "dark_mode", tags=["config"])
+value = store.get_memory("sess-1", "user_pref")
+```
+
+## Observability
+
+Built-in metrics collection and structured logging:
+
+```python
+from healthy_agent.observability.metrics import metrics
+
+# Automatic instrumentation in Executor, Kernel, WebSocket
+# Access via REST endpoint:
+# GET /metrics → {"counters": {...}, "gauges": {...}, "latencies": {...}}
+
+# Manual instrumentation:
+metrics.increment("custom.counter", tags={"env": "prod"})
+metrics.gauge("queue.depth", 42)
+with metrics.timer("my_operation"):
+    await do_work()
+```
+
+## Plugin System
+
+Extend the agent with plugins that hook into the lifecycle:
+
+```python
+from healthy_agent.plugin import Plugin, PluginMetadata, PluginManager
+
+class MyPlugin(Plugin):
+    @property
+    def metadata(self):
+        return PluginMetadata(name="my-plugin", version="1.0.0")
+
+    def on_start(self):
+        print("Plugin started!")
+
+    def pre_generate(self, messages, **kwargs):
+        # Modify messages before LLM call
+        return messages
+
+    def post_generate(self, result):
+        # Process result after LLM call
+        return result
+
+manager = PluginManager()
+manager.register(MyPlugin())
+manager.start_all()
+```
+
 ## Memory System
 
 Two-tier memory inspired by RAM + Disk:
@@ -375,6 +456,7 @@ Processes enter at Queue 0. If they use their full time slice (CPU-bound), they 
 | `POST` | `/sessions/{id}/skills/{name}` | Invoke a skill |
 | `GET` | `/kernel/ps` | Process table |
 | `GET` | `/kernel/stats` | Scheduler stats |
+| `GET` | `/metrics` | Metrics snapshot (counters, gauges, latencies) |
 | `WS` | `/ws/{session_id}` | WebSocket chat (streaming + agent mode) |
 
 ### WebSocket Messages
@@ -400,7 +482,7 @@ src/
 │   │   ├── process.py      # Process + PCB + state machine
 │   │   ├── scheduler.py    # MLFQ scheduler
 │   │   ├── core.py         # Core (worker executing processes)
-│   │   └── runtime.py      # Kernel (orchestrator)
+│   │   └── runtime.py      # Kernel (orchestrator + resource limits)
 │   ├── syscall/
 │   │   ├── api.py          # fork / wait / exit / io
 │   │   └── supervisor.py   # supervised_fork (auto-retry)
@@ -409,6 +491,14 @@ src/
 │   │   ├── workflow.py     # DAG workflow engine
 │   │   ├── multi.py        # Multi-agent coordinator
 │   │   └── rag.py          # RAG (vector store + retrieval)
+│   ├── execution/
+│   │   └── executor.py     # Executor with run() + run_stream()
+│   ├── strategy/
+│   │   ├── reflexion.py    # Reflexion (self-reflection retry)
+│   │   └── planner.py      # PlanExecute (decompose + execute)
+│   ├── orchestration/
+│   │   ├── workflow.py     # DAG workflow engine
+│   │   └── multi.py        # Multi-agent coordinator
 │   ├── drivers/
 │   │   ├── base.py         # LLMDriver / ToolDriver ABC
 │   │   ├── anthropic.py    # Anthropic Claude driver
@@ -417,12 +507,20 @@ src/
 │   ├── skill/
 │   │   ├── base.py         # Tool / Skill base classes
 │   │   ├── builtin.py      # Built-in tools and skills
-│   │   └── registry.py     # SkillRegistry (load, route, invoke)
+│   │   └── registry.py     # SkillRegistry (load, route, invoke, hot-reload)
 │   ├── memory/
 │   │   ├── store.py        # ShortTermMemory / LongTermMemory / MemoryManager
 │   │   └── backend.py      # Redis / Mem0 backends
 │   ├── session/
 │   │   └── manager.py      # Session + SessionManager
+│   ├── persistence/
+│   │   └── sqlite_store.py # SQLite persistence (sessions + memory)
+│   ├── observability/
+│   │   ├── metrics.py      # MetricsCollector (counters, gauges, latency)
+│   │   └── logging_config.py # Structured JSON logging
+│   ├── plugin/
+│   │   ├── base.py         # Plugin ABC + PluginMetadata + hooks
+│   │   └── manager.py      # PluginManager (register, lifecycle, emit)
 │   ├── mcp/
 │   │   ├── protocol.py     # MCP JSON-RPC protocol
 │   │   ├── server.py       # McpServer
@@ -430,9 +528,9 @@ src/
 │   └── ipc/
 │       └── channel.py      # Async message channel
 ├── api/
-│   ├── app.py              # FastAPI app + REST + WebSocket
+│   ├── app.py              # FastAPI app + REST + WebSocket + /metrics
 │   └── web.py              # Built-in debug web UI
-└── cli.py                  # CLI (run / serve / ps)
+└── cli.py                  # CLI (run / serve / chat / ps)
 skills/
 ├── file_tools.py           # read_file, write_file, edit_file, list_dir, search_text
 └── shell_tools.py          # shell, http_request, python_eval

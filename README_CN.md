@@ -116,6 +116,10 @@ healthy-agent run "写一个函数" --driver anthropic --cores 4
 # 使用 DeepSeek / Qwen / Ollama / Zhipu / OpenAI
 healthy-agent run "解释 async" --driver deepseek
 healthy-agent run "解释量子计算" --driver qwen
+
+# 交互式聊天（REPL 模式，流式输出）
+healthy-agent chat --driver anthropic
+healthy-agent chat --driver deepseek --model deepseek-chat
 ```
 
 ### Web 服务器 + WebSocket
@@ -158,11 +162,19 @@ ws.send(JSON.stringify({ prompt: "你好！", mode: "agent" }));
 ├──────────────────────────────────────────────────────────────┤
 │                      技能与工具                              │
 │  file_tools │ shell_tools │ python_eval │ LLM skills         │
+│  热加载（文件监听）│ 插件注册的技能                          │
 ├──────────────────────────────────────────────────────────────┤
 │          记忆系统         │          IPC / MCP               │
 │  短期 │ 长期             │  Channel │ McpServer │ McpClient  │
 │ (RAM/ │ (磁盘/           │ (异步    │ (JSON-RPC │ (连接      │
 │  TTL) │  Redis/Mem0)     │  消息)   │  stdio)   │  外部服务) │
+├──────────────────────────────────────────────────────────────┤
+│         持久化层          │          可观测性                 │
+│  SQLiteStore (WAL 模式)   │  MetricsCollector │ 结构化日志   │
+│  sessions + memory        │  计数器/延迟/仪表 │ JSON 格式    │
+├──────────────────────────────────────────────────────────────┤
+│                        插件系统                              │
+│  Plugin 基类 │ PluginManager │ 生命周期钩子 │ Entry points  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -286,6 +298,75 @@ context = rag.retrieve_context("调度是怎么工作的？")
 
 自定义技能可通过 `SkillRegistry.load_directory()` 从任意目录加载。
 
+技能支持**热加载** —— 启动文件监听后，技能文件的变更会被自动加载：
+
+```python
+registry = SkillRegistry()
+registry.load_directory("./skills")
+registry.start_watcher(poll_interval=2.0)  # 每 2 秒轮询文件变化
+```
+
+## 持久化
+
+基于 SQLite 的持久化存储（WAL 模式支持并发读取）：
+
+```python
+from healthy_agent.persistence import SQLiteStore
+
+store = SQLiteStore("./data/agent.db")
+store.save_session("sess-1", messages=[...], metadata={...})
+session = store.load_session("sess-1")
+
+store.put_memory("sess-1", "user_pref", "dark_mode", tags=["config"])
+value = store.get_memory("sess-1", "user_pref")
+```
+
+## 可观测性
+
+内置指标收集和结构化日志：
+
+```python
+from healthy_agent.observability.metrics import metrics
+
+# Executor、Kernel、WebSocket 中已自动埋点
+# 通过 REST 端点访问：
+# GET /metrics -> {"counters": {...}, "gauges": {...}, "latencies": {...}}
+
+# 手动埋点：
+metrics.increment("custom.counter", tags={"env": "prod"})
+metrics.gauge("queue.depth", 42)
+with metrics.timer("my_operation"):
+    await do_work()
+```
+
+## 插件系统
+
+通过插件扩展 Agent 能力，支持生命周期钩子：
+
+```python
+from healthy_agent.plugin import Plugin, PluginMetadata, PluginManager
+
+class MyPlugin(Plugin):
+    @property
+    def metadata(self):
+        return PluginMetadata(name="my-plugin", version="1.0.0")
+
+    def on_start(self):
+        print("插件启动！")
+
+    def pre_generate(self, messages, **kwargs):
+        # LLM 调用前修改消息
+        return messages
+
+    def post_generate(self, result):
+        # LLM 调用后处理结果
+        return result
+
+manager = PluginManager()
+manager.register(MyPlugin())
+manager.start_all()
+```
+
 ## 记忆系统
 
 两级记忆，灵感来自 RAM + 磁盘：
@@ -375,6 +456,7 @@ result = await client.call_tool("some_tool", {"arg": "value"})
 | `POST` | `/sessions/{id}/skills/{name}` | 调用技能 |
 | `GET` | `/kernel/ps` | 进程表 |
 | `GET` | `/kernel/stats` | 调度器统计 |
+| `GET` | `/metrics` | 指标快照（计数器、仪表、延迟） |
 | `WS` | `/ws/{session_id}` | WebSocket 聊天（流式 + Agent 模式） |
 
 ### WebSocket 消息
@@ -427,12 +509,20 @@ src/
 │   │   ├── protocol.py     # MCP JSON-RPC 协议
 │   │   ├── server.py       # McpServer
 │   │   └── client.py       # McpClient
+│   ├── persistence/
+│   │   └── sqlite_store.py # SQLite 持久化（sessions + memory）
+│   ├── observability/
+│   │   ├── metrics.py      # MetricsCollector（计数器、仪表、延迟）
+│   │   └── logging_config.py # 结构化 JSON 日志
+│   ├── plugin/
+│   │   ├── base.py         # Plugin 抽象基类 + 钩子定义
+│   │   └── manager.py      # PluginManager（注册、生命周期、事件）
 │   └── ipc/
 │       └── channel.py      # 异步消息通道
 ├── api/
-│   ├── app.py              # FastAPI 应用 + REST + WebSocket
+│   ├── app.py              # FastAPI 应用 + REST + WebSocket + /metrics
 │   └── web.py              # 内置调试 Web UI
-└── cli.py                  # CLI（run / serve / ps）
+└── cli.py                  # CLI（run / serve / chat / ps）
 skills/
 ├── file_tools.py           # read_file, write_file, edit_file, list_dir, search_text
 └── shell_tools.py          # shell, http_request, python_eval
