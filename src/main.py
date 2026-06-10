@@ -47,6 +47,7 @@ def main():
         log_level=args.log_level.lower(),
         reload=True,
         factory=True,
+        log_config=None,
     )
 
 

@@ -1,0 +1,41 @@
+site_name: Healthy Agent
+site_description: A CPU-scheduling-inspired runtime kernel for LLM agent workloads
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - toc.integrate
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - Configuration: getting-started/configuration.md
+  - Concepts:
+    - Architecture: concepts/architecture.md
+    - Kernel & Scheduling: concepts/kernel.md
+    - Agent Patterns: concepts/patterns.md
+  - Guides:
+    - Skills & Tools: guides/skills.md
+    - Memory System: guides/memory.md
+    - Plugins: guides/plugins.md
+    - Resilience: guides/resilience.md
+    - Observability: guides/observability.md
+  - API Reference:
+    - REST API: api/rest.md
+    - WebSocket: api/websocket.md
+    - Python SDK: api/python.md
+
+markdown_extensions:
+  - admonition
+  - codehilite
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/your-org/healthy-agent

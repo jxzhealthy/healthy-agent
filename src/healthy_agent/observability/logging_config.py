@@ -80,3 +80,10 @@ def setup_logging(
         root.addHandler(file_handler)
 
     root.propagate = False
+
+    # Unify uvicorn loggers to use our formatter
+    for uvicorn_logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uv_logger = logging.getLogger(uvicorn_logger_name)
+        uv_logger.handlers.clear()
+        uv_logger.addHandler(console)
+        uv_logger.propagate = False

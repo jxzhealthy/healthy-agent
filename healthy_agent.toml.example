@@ -1,0 +1,88 @@
+# Healthy Agent 配置示例
+# 复制此文件为 healthy_agent.toml 或 healthy_agent.yaml 并修改配置
+
+# ==================== 服务器配置 ====================
+[server]
+host = "0.0.0.0"              # 监听地址
+port = 8000                    # 监听端口
+cors_origins = ["*"]           # CORS 允许的源，使用 ["*"] 允许所有
+
+# ==================== 内核调度配置 ====================
+[kernel]
+num_cores = 4                  # 虚拟核心数（并发处理能力）
+max_processes = 100            # 最大进程数
+max_spawn_rate = 100.0         # 最大 spawn 速率（每秒）
+
+# ==================== LLM 驱动配置 ====================
+[driver]
+name = "openai"                # 驱动名称: openai/anthropic/ollama/custom
+model = "gpt-4o"               # 模型名称
+api_key = ""                   # API Key（建议通过环境变量设置）
+base_url = ""                  # 自定义 API 基础 URL（可选）
+max_tokens = 4096              # 最大输出 token 数
+timeout = 60                   # 请求超时时间（秒）
+
+# ==================== 备用驱动配置 ====================
+[fallback_driver]
+name = "openai"                # 备用驱动名称
+model = "gpt-4o-mini"          # 备用模型（更便宜/快速）
+api_key = ""                   # 备用 API Key
+base_url = ""                  # 备用 base_url
+
+# ==================== 记忆系统配置 ====================
+[memory]
+backend = "local"              # 后端类型: local/redis/mem0
+redis_url = "redis://localhost:6379"  # Redis 连接 URL（当 backend=redis 时）
+ttl = 3600                     # 记忆存活时间（秒）
+
+# ==================== 持久化配置 ====================
+[persistence]
+enabled = true                 # 是否启用持久化
+db_path = "./healthy_agent.db" # 数据库文件路径
+
+# ==================== 可观测性配置 ====================
+[observability]
+log_level = "INFO"             # 日志级别: DEBUG/INFO/WARNING/ERROR
+log_format = "text"            # 日志格式: text/json
+metrics_enabled = false        # 是否启用指标收集
+
+# ==================== 认证配置 ====================
+[auth]
+enabled = false                # 是否启用认证
+api_keys = []                  # API Key 列表
+jwt_secret = ""                # JWT 密钥
+
+# ==================== 技能系统配置 ====================
+[skills]
+directories = ["./skills"]     # 技能目录列表
+hot_reload = true              # 是否启用热重载
+poll_interval = 5              # 轮询间隔（秒）
+
+# ==================== 沙箱配置 ====================
+[sandbox]
+enabled = false                # 是否启用沙箱
+timeout = 30                   # 沙箱执行超时（秒）
+max_memory_mb = 512            # 最大内存限制（MB）
+
+# ==================== 上下文压缩配置 ====================
+[compression]
+enabled = true                 # 是否启用上下文压缩
+max_tokens_threshold = 30000   # 触发压缩的 token 阈值
+summary_model = ""             # 留空则使用主 driver 模型，也可指定如 "gpt-4o-mini"
+
+# ==================== Headroom 压缩配置 ====================
+[headroom]
+enabled = true                 # 是否启用 Headroom 规则压缩（第一层）
+compress_tool_outputs = true   # 压缩工具输出（JSON、日志）
+compress_code = true           # 压缩代码块
+compress_json = true           # 压缩 JSON 数据
+min_content_length = 200       # 仅压缩超过此长度的内容（字符数）
+target_ratio = 0.3             # 目标压缩比（0.3 = 保留 30%）
+
+# ==================== 重试与熔断配置 ====================
+[resilience]
+max_retries = 3                # 最大重试次数
+base_delay = 1.0               # 重试基础延迟（秒）
+max_delay = 30.0               # 重试最大延迟（秒）
+circuit_breaker_threshold = 5  # 连续失败多少次触发熔断
+circuit_breaker_timeout = 60   # 熔断恢复等待时间（秒）

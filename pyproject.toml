@@ -29,6 +29,8 @@ dependencies = [
 
 [project.optional-dependencies]
 mem0 = ["mem0ai>=2.0"]
+headroom = ["headroom-ai>=0.1"]
+all = ["mem0ai>=2.0", "headroom-ai>=0.1"]
 
 [project.urls]
 Homepage = "https://github.com/jxzhealthy/healthy-agent"

@@ -166,4 +166,4 @@ def serve(host: str, port: int, cores: int, driver: str, model: str | None, skil
     click.echo(f"  Kernel: {cores} cores | Driver: {driver} | Model: {model or 'default'}")
     click.echo(f"  Skills: {skills_dir or 'default (./skills)'}")
     click.echo(f"  Docs: http://{host}:{port}/docs")
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    uvicorn.run(app, host=host, port=port, log_level="info", log_config=None)

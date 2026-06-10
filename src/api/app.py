@@ -57,6 +57,9 @@ def create_app(
     model: str | None = None,
     skills_dir: str | None = None,
 ) -> FastAPI:
+    from healthy_agent.observability.logging_config import setup_logging
+    setup_logging(level="INFO")
+
     app = FastAPI(
         title="Healthy Agent",
         description="CPU-scheduling-inspired OS kernel for LLM agent workloads",
@@ -130,6 +133,19 @@ def create_app(
 
         asyncio.create_task(_kernel_loop())
         asyncio.create_task(_reap_loop())
+
+        # Auto-register context compression plugin
+        from healthy_agent.plugin.headroom_plugin import HeadroomPlugin, HeadroomFallbackPlugin, _check_headroom
+        from healthy_agent.plugin.manager import PluginManager
+        _plugin_manager = PluginManager()
+        if _check_headroom():
+            _plugin_manager.register(HeadroomPlugin())
+            logger.info("HeadroomPlugin registered (full compression)")
+        else:
+            _plugin_manager.register(HeadroomFallbackPlugin())
+            logger.info("HeadroomFallbackPlugin registered (lightweight compression)")
+        _plugin_manager.start_all()
+        app.state.plugin_manager = _plugin_manager
 
     @app.on_event("shutdown")
     async def shutdown():
@@ -401,6 +417,12 @@ def create_app(
                     # Non-agent mode: pass full history as messages array
                     messages = list(history)
                     messages.append({"role": "user", "content": prompt})
+
+                    # Apply plugin pre_generate (Headroom compression)
+                    if hasattr(app.state, "plugin_manager"):
+                        for plugin in app.state.plugin_manager.list_plugins():
+                            messages = plugin.pre_generate(messages)
+
                     try:
                         chunks = []
                         async for chunk in driver.stream(
