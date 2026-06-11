@@ -2,36 +2,38 @@
 
 **A CPU-scheduling-inspired runtime kernel for LLM agent workloads**
 
-Healthy Agent 是一个创新的智能体运行时框架，借鉴操作系统 CPU 调度理念，为 LLM 智能体工作负载提供高效的资源管理和任务调度能力。
+Healthy Agent is an innovative agent runtime framework that borrows OS CPU scheduling concepts to provide efficient resource management and task orchestration for LLM agent workloads.
 
-## 核心特性
+## Core Features
 
-- **内核级调度**: 基于优先级的任务调度系统，优化资源利用
-- **弹性执行器**: 支持重试、超时控制和熔断机制
-- **技能系统**: 模块化技能管理，支持动态加载
-- **记忆系统**: 短期和长期记忆支持，上下文管理
-- **可观测性**: 内置监控、日志和指标收集
-- **Web API**: RESTful API 和 WebSocket 支持
+- **Kernel-Level Scheduling**: Priority-based task scheduling with multi-core support
+- **Resilient Execution**: Built-in retry, timeout control, and circuit breaking
+- **Skill System**: Modular skill management with dynamic loading capabilities
+- **Memory Management**: Short-term and long-term memory with context preservation
+- **Observability**: Integrated monitoring, structured logging, and metrics collection
+- **Multiple Interfaces**: REST API, WebSocket streaming, and Python SDK
 
-## 快速安装
+## Quick Install
 
 ```bash
 pip install healthy-agent
 ```
 
-或使用 uv（推荐）：
+Or with uv (recommended):
 
 ```bash
 uv add healthy-agent
 ```
 
-## 开始使用
+## Getting Started
 
-查看 [快速开始](getting-started/quickstart.md) 了解如何在几分钟内运行你的第一个智能体。
+Check out the [Quick Start Guide](getting-started/quickstart.md) to run your first agent in minutes.
 
-## 文档导航
+## Documentation
 
-- **[入门指南](getting-started/installation.md)**: 安装和配置
-- **[核心概念](concepts/architecture.md)**: 理解架构设计
-- **[使用指南](guides/skills.md)**: 技能和工具开发
-- **[API 参考](api/rest.md)**: REST API 文档
+- **[Installation](getting-started/installation.md)**: Setup and configuration
+- **[Architecture](concepts/architecture.md)**: Understand the design principles
+- **[Skills Guide](guides/skills.md)**: Build and integrate custom skills
+- **[REST API](api/rest.md)**: HTTP endpoint reference
+- **[WebSocket API](api/websocket.md)**: Real-time streaming interface
+- **[Python SDK](api/python.md)**: Programmatic access
