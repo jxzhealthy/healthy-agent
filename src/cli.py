@@ -151,19 +151,27 @@ def ps(cores: int):
 
 
 @main.command()
-@click.option("--host", default="0.0.0.0", help="Bind host")
-@click.option("--port", "-p", default=8000, help="Bind port")
-@click.option("--cores", "-c", default=4, help="Number of kernel cores")
-@click.option("--driver", "-d", default="mock", help="LLM driver: mock, anthropic, deepseek, zhipu, ollama")
+@click.option("--host", default=None, help="Bind host (default from config)")
+@click.option("--port", "-p", default=None, type=int, help="Bind port (default from config)")
+@click.option("--cores", "-c", default=None, type=int, help="Number of kernel cores")
+@click.option("--driver", "-d", default=None, help="LLM driver: mock, anthropic, deepseek, zhipu, ollama")
 @click.option("--model", "-m", default=None, help="Model name (defaults per driver)")
 @click.option("--skills-dir", default=None, help="Skills directory (default: ./skills)")
-def serve(host: str, port: int, cores: int, driver: str, model: str | None, skills_dir: str | None):
+@click.option("--config", "-f", default=None, help="Config file path (healthy_agent.toml)")
+def serve(host: str | None, port: int | None, cores: int | None, driver: str | None,
+          model: str | None, skills_dir: str | None, config: str | None):
     """Start the HTTP server (Kernel runs persistently)."""
     import uvicorn
     from api import create_app
-    app = create_app(num_cores=cores, driver_name=driver, model=model, skills_dir=skills_dir)
-    click.echo(f"Healthy Agent server starting on {host}:{port}")
-    click.echo(f"  Kernel: {cores} cores | Driver: {driver} | Model: {model or 'default'}")
-    click.echo(f"  Skills: {skills_dir or 'default (./skills)'}")
-    click.echo(f"  Docs: http://{host}:{port}/docs")
-    uvicorn.run(app, host=host, port=port, log_level="info", log_config=None)
+    app = create_app(
+        num_cores=cores, driver_name=driver, model=model,
+        skills_dir=skills_dir, config_path=config,
+    )
+    cfg = app.state.settings
+    bind_host = host or cfg.server.host
+    bind_port = port or cfg.server.port
+    click.echo(f"Healthy Agent server starting on {bind_host}:{bind_port}")
+    click.echo(f"  Kernel: {cfg.kernel.num_cores} cores | Driver: {cfg.driver.name} | Model: {cfg.driver.model}")
+    click.echo(f"  Config: {config or 'auto-detect'}")
+    click.echo(f"  Docs: http://{bind_host}:{bind_port}/docs")
+    uvicorn.run(app, host=bind_host, port=bind_port, log_level=cfg.observability.log_level.lower(), log_config=None)

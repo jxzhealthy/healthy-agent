@@ -237,6 +237,8 @@ def _dict_to_settings(config_dict: dict[str, Any]) -> Settings:
         "skills": SkillsConfig,
         "sandbox": SandboxConfig,
         "compression": CompressionConfig,
+        "headroom": HeadroomConfig,
+        "resilience": ResilienceConfig,
     }
     
     for section_name, section_class in section_mapping.items():

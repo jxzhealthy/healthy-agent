@@ -32,7 +32,14 @@ class Core:
             if process is None:
                 if self._kernel._shutdown.is_set():
                     break
-                await asyncio.sleep(0.005)
+                # Wait for work signal instead of polling
+                self._kernel._work_available.clear()
+                try:
+                    await asyncio.wait_for(
+                        self._kernel._work_available.wait(), timeout=0.05
+                    )
+                except asyncio.TimeoutError:
+                    pass
                 continue
 
             self.current = process

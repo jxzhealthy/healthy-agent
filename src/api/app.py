@@ -52,48 +52,86 @@ class SkillInvokeRequest(BaseModel):
 
 def create_app(
     *,
-    num_cores: int = 4,
-    driver_name: str = "mock",
+    num_cores: int | None = None,
+    driver_name: str | None = None,
     model: str | None = None,
     skills_dir: str | None = None,
+    config_path: str | None = None,
 ) -> FastAPI:
+    from healthy_agent.config.settings import load_config, Settings
+    cfg = load_config(path=config_path)
+
+    # CLI overrides take precedence over config file
+    if num_cores is not None:
+        cfg.kernel.num_cores = num_cores
+    if driver_name is not None:
+        cfg.driver.name = driver_name
+    if model is not None:
+        cfg.driver.model = model
+
+    # Store settings on module level for access by other components
+    app_settings = cfg
+
     from healthy_agent.observability.logging_config import setup_logging
-    setup_logging(level="INFO")
+    setup_logging(
+        level=cfg.observability.log_level,
+        structured=(cfg.observability.log_format == "json"),
+    )
 
     app = FastAPI(
         title="Healthy Agent",
         description="CPU-scheduling-inspired OS kernel for LLM agent workloads",
-        version="0.2.0",
+        version="0.3.0",
     )
+    app.state.settings = cfg
 
-    # API key auth middleware (skip for web UI and health check)
-    api_key = os.environ.get("HA_API_KEY", "")
-    if api_key:
+    # Auth middleware from settings
+    if cfg.auth.enabled and cfg.auth.api_keys:
+        api_keys_set = set(cfg.auth.api_keys)
         class AuthMiddleware(BaseHTTPMiddleware):
             async def dispatch(self, request: Request, call_next):
                 path = request.url.path
                 if path in ("/", "/health") or path.startswith("/static"):
                     return await call_next(request)
-                # WebSocket auth is handled via query param
                 if request.scope.get("type") == "websocket":
                     return await call_next(request)
                 token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-                if token != api_key:
+                if token not in api_keys_set:
                     return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
                 return await call_next(request)
         app.add_middleware(AuthMiddleware)
-        logger.info("API key authentication enabled")
+        logger.info("API key authentication enabled (%d keys)", len(cfg.auth.api_keys))
+    elif os.environ.get("HA_API_KEY"):
+        # Backward compat: support HA_API_KEY env var
+        legacy_key = os.environ["HA_API_KEY"]
+        class LegacyAuthMiddleware(BaseHTTPMiddleware):
+            async def dispatch(self, request: Request, call_next):
+                path = request.url.path
+                if path in ("/", "/health") or path.startswith("/static"):
+                    return await call_next(request)
+                if request.scope.get("type") == "websocket":
+                    return await call_next(request)
+                token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+                if token != legacy_key:
+                    return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+                return await call_next(request)
+        app.add_middleware(LegacyAuthMiddleware)
+        logger.info("API key authentication enabled (legacy HA_API_KEY)")
 
     from .web import router as web_router
     app.include_router(web_router)
 
-    kernel = Kernel(num_cores=num_cores)
+    kernel = Kernel(
+        num_cores=cfg.kernel.num_cores,
+        max_processes=cfg.kernel.max_processes,
+        max_spawn_rate=cfg.kernel.max_spawn_rate,
+    )
     sessions = SessionManager()
     skills = SkillRegistry()
     from pathlib import Path
     builtin_skills_dir = Path(__file__).parent.parent.parent / "skills"
     skills.load_directory(builtin_skills_dir)
-    extra_skills_dir = skills_dir or os.environ.get("HA_SKILLS_DIR")
+    extra_skills_dir = skills_dir or (cfg.skills.directories[0] if cfg.skills.directories else None)
     if extra_skills_dir and str(Path(extra_skills_dir).resolve()) != str(builtin_skills_dir.resolve()):
         skills.load_directory(extra_skills_dir)
 
@@ -103,22 +141,25 @@ def create_app(
     @app.on_event("startup")
     async def startup():
         nonlocal driver
-        logger.info("Starting Healthy Agent server: cores=%d driver=%s", num_cores, driver_name)
-        if driver_name == "anthropic":
+        drv_name = cfg.driver.name
+        drv_model = cfg.driver.model
+        logger.info("Starting Healthy Agent server: cores=%d driver=%s model=%s",
+                     cfg.kernel.num_cores, drv_name, drv_model)
+        if drv_name == "anthropic":
             from healthy_agent.drivers.anthropic import AnthropicDriver
-            driver = AnthropicDriver(model=model or "claude-sonnet-4-20250514")
-        elif driver_name == "deepseek":
+            driver = AnthropicDriver(model=drv_model or "claude-sonnet-4-20250514")
+        elif drv_name == "deepseek":
             from healthy_agent.drivers.openai_compat import DeepSeekDriver
-            driver = DeepSeekDriver(model=model or "deepseek-chat")
-        elif driver_name == "zhipu":
+            driver = DeepSeekDriver(model=drv_model or "deepseek-chat")
+        elif drv_name == "zhipu":
             from healthy_agent.drivers.openai_compat import ZhipuDriver
-            driver = ZhipuDriver(model=model or "glm-4")
-        elif driver_name == "qwen":
+            driver = ZhipuDriver(model=drv_model or "glm-4")
+        elif drv_name == "qwen":
             from healthy_agent.drivers.openai_compat import QwenDriver
-            driver = QwenDriver(model=model or "qwen-plus")
-        elif driver_name == "ollama":
+            driver = QwenDriver(model=drv_model or "qwen-plus")
+        elif drv_name == "ollama":
             from healthy_agent.drivers.openai_compat import OllamaDriver
-            driver = OllamaDriver(model=model or "llama3")
+            driver = OllamaDriver(model=drv_model or "llama3")
 
         async def _kernel_loop():
             kernel._shutdown.clear()
@@ -135,17 +176,28 @@ def create_app(
         asyncio.create_task(_reap_loop())
 
         # Auto-register context compression plugin
-        from healthy_agent.plugin.headroom_plugin import HeadroomPlugin, HeadroomFallbackPlugin, _check_headroom
-        from healthy_agent.plugin.manager import PluginManager
-        _plugin_manager = PluginManager()
-        if _check_headroom():
-            _plugin_manager.register(HeadroomPlugin())
-            logger.info("HeadroomPlugin registered (full compression)")
-        else:
-            _plugin_manager.register(HeadroomFallbackPlugin())
-            logger.info("HeadroomFallbackPlugin registered (lightweight compression)")
-        _plugin_manager.start_all()
-        app.state.plugin_manager = _plugin_manager
+        if cfg.headroom.enabled:
+            from healthy_agent.plugin.headroom_plugin import (
+                HeadroomPlugin, HeadroomFallbackPlugin, HeadroomConfig, _check_headroom,
+            )
+            from healthy_agent.plugin.manager import PluginManager
+            _plugin_manager = PluginManager()
+            if _check_headroom():
+                headroom_cfg = HeadroomConfig(
+                    enabled=cfg.headroom.enabled,
+                    compress_tool_outputs=cfg.headroom.compress_tool_outputs,
+                    compress_code=cfg.headroom.compress_code,
+                    compress_json=cfg.headroom.compress_json,
+                    min_content_length=cfg.headroom.min_content_length,
+                    target_ratio=cfg.headroom.target_ratio,
+                )
+                _plugin_manager.register(HeadroomPlugin(config=headroom_cfg))
+                logger.info("HeadroomPlugin registered (full compression)")
+            else:
+                _plugin_manager.register(HeadroomFallbackPlugin())
+                logger.info("HeadroomFallbackPlugin registered (lightweight compression)")
+            _plugin_manager.start_all()
+            app.state.plugin_manager = _plugin_manager
 
     @app.on_event("shutdown")
     async def shutdown():
@@ -474,10 +526,10 @@ def create_app(
 
 
 def app_instance() -> FastAPI:
-    """Factory for uvicorn reload mode. Reads config from env vars."""
+    """Factory for uvicorn reload mode. Reads config from env/toml."""
     return create_app(
-        num_cores=int(os.environ.get("HA_CORES", "4")),
-        driver_name=os.environ.get("HA_DRIVER", "mock"),
-        model=os.environ.get("HA_MODEL"),
-        skills_dir=os.environ.get("HA_SKILLS_DIR"),
+        num_cores=int(os.environ.get("HA_CORES")) if os.environ.get("HA_CORES") else None,
+        driver_name=os.environ.get("HA_DRIVER") or None,
+        model=os.environ.get("HA_MODEL") or None,
+        skills_dir=os.environ.get("HA_SKILLS_DIR") or None,
     )

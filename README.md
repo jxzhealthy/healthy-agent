@@ -178,6 +178,25 @@ ws.send(JSON.stringify({ prompt: "Hello!", mode: "agent" }));
 └──────────────────────────────────────────────────────────────┘
 ```
 
+## Performance
+
+Benchmark results on Python 3.14 (Apple Silicon):
+
+| Metric | Result |
+|--------|--------|
+| Spawn throughput | 420,000+ tasks/sec |
+| Scheduling latency (p50) | ~3ms |
+| Scheduling latency (p99) | ~4ms |
+| CPU-bound throughput (4 cores) | 18,000+ tasks/sec |
+| IO-bound throughput (8 cores) | 3,900+ tasks/sec |
+| Process lifecycle (p50) | ~5ms |
+| Reap (5000 processes) | ~2ms |
+
+Run benchmarks yourself:
+```bash
+python benchmarks/bench_kernel.py
+```
+
 ## Agent Patterns
 
 ### Executor (Task Execution Engine)
@@ -273,6 +292,30 @@ context = rag.retrieve_context("How does scheduling work?")
 | `OllamaDriver` | Ollama (local) | — | `llama3` |
 
 All OpenAI-compatible drivers support streaming via `driver.stream()`.
+
+## Configuration
+
+Healthy Agent uses a unified TOML/YAML configuration system. Create a `healthy_agent.toml` in your project root:
+
+```toml
+[driver]
+name = "anthropic"
+model = "claude-sonnet-4-20250514"
+
+[kernel]
+num_cores = 8
+
+[compression]
+max_tokens_threshold = 30000
+
+[headroom]
+enabled = true
+target_ratio = 0.3
+```
+
+Configuration priority: CLI args > Environment variables (`HEALTHY_AGENT_*`) > Config file > Defaults
+
+See `healthy_agent.toml.example` for all available options.
 
 ## Skills & Tools
 

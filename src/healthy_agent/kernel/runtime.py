@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import deque
 from typing import Any, Callable, Coroutine
 
 from .process import Process, ProcessState
@@ -40,16 +41,18 @@ class Kernel:
         self.cores: list[Core] = [Core(i, self) for i in range(num_cores)]
         self.process_table: dict[int, Process] = {}
         self._pid_counter = 0
+        self._active_count = 0  # O(1) active process counter
         self._events: dict[int, asyncio.Event] = {}
         self._waiters: dict[int, int] = {}
         self._shutdown = asyncio.Event()
+        self._work_available = asyncio.Event()  # Signal cores when work is ready
         self._reap_queue: list[tuple[float, int]] = []
         self._reap_ttl = 60.0
         self._start_time = time.monotonic()
         # Resource limits
         self._max_processes = max_processes
         self._max_spawn_rate = max_spawn_rate
-        self._spawn_timestamps: list[float] = []
+        self._spawn_timestamps: deque[float] = deque()  # O(1) popleft
 
     def spawn(
         self,
@@ -59,25 +62,19 @@ class Kernel:
         parent_pid: int | None = None,
         preemptible: bool = True,
     ) -> int:
-        # Resource limit: max processes
-        active_count = sum(
-            1 for p in self.process_table.values()
-            if p.state != ProcessState.TERMINATED
-        )
-        if active_count >= self._max_processes:
-            self.reap()  # Try reaping first
-            active_count = sum(
-                1 for p in self.process_table.values()
-                if p.state != ProcessState.TERMINATED
-            )
-            if active_count >= self._max_processes:
+        # Resource limit: max processes (O(1) check)
+        if self._active_count >= self._max_processes:
+            self.reap()
+            if self._active_count >= self._max_processes:
                 raise ResourceError(
-                    f"Max processes exceeded: {active_count}/{self._max_processes}"
+                    f"Max processes exceeded: {self._active_count}/{self._max_processes}"
                 )
 
-        # Resource limit: spawn rate
+        # Resource limit: spawn rate (O(1) amortized with deque)
         now = time.monotonic()
-        self._spawn_timestamps = [t for t in self._spawn_timestamps if now - t < 1.0]
+        cutoff = now - 1.0
+        while self._spawn_timestamps and self._spawn_timestamps[0] < cutoff:
+            self._spawn_timestamps.popleft()
         if len(self._spawn_timestamps) >= self._max_spawn_rate:
             raise ResourceError(
                 f"Spawn rate exceeded: {len(self._spawn_timestamps)}/{self._max_spawn_rate} per second"
@@ -88,6 +85,7 @@ class Kernel:
         pid = self._pid_counter
         process = Process(pid, task_type, payload, handler=handler, parent_pid=parent_pid)
         self.process_table[pid] = process
+        self._active_count += 1
         if parent_pid is not None:
             parent = self.process_table.get(parent_pid)
             if parent:
@@ -95,10 +93,10 @@ class Kernel:
         self.scheduler.admit(process)
         if not preemptible:
             process.pcb.time_slice = float("inf")
+        # Signal cores that work is available
+        self._work_available.set()
         metrics.increment("kernel.spawns", tags={"type": task_type})
-        metrics.gauge("kernel.active_processes", sum(
-            1 for p in self.process_table.values() if p.state != ProcessState.TERMINATED
-        ))
+        metrics.gauge("kernel.active_processes", self._active_count)
         logger.debug("spawn pid=%d type=%s parent=%s preemptible=%s", pid, task_type, parent_pid, preemptible)
         return pid
 
@@ -136,6 +134,7 @@ class Kernel:
     def _complete(self, process: Process, result: Any) -> None:
         process.pcb.state = ProcessState.TERMINATED
         process.pcb.result = result
+        self._active_count -= 1
         metrics.increment("kernel.completed", tags={"type": process.task_type})
         metrics.record_latency("kernel.process_cpu", process.pcb.cpu_time, tags={"type": process.task_type})
         if isinstance(result, Exception):
@@ -150,6 +149,7 @@ class Kernel:
             if waiter and waiter.state == ProcessState.BLOCKED:
                 waiter.pcb.context["wait_result"] = result
                 self.scheduler.unblock(waiter)
+                self._work_available.set()
         self._reap_queue.append((time.monotonic() + self._reap_ttl, process.pid))
 
     def io_complete(self, process: Process, result: Any = None) -> None:
@@ -157,6 +157,7 @@ class Kernel:
             return
         process.pcb.context["io_result"] = result
         self.scheduler.unblock(process)
+        self._work_available.set()
 
     def reap(self) -> int:
         now = time.monotonic()

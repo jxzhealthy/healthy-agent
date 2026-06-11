@@ -17,9 +17,10 @@ Usage:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-
 from .base import Plugin, PluginContext, PluginMetadata
+
+# Re-export HeadroomConfig from the canonical location
+from healthy_agent.config.settings import HeadroomConfig
 
 logger = logging.getLogger("healthy_agent.plugin.headroom")
 
@@ -30,17 +31,6 @@ def _check_headroom() -> bool:
         return True
     except ImportError:
         return False
-
-
-@dataclass
-class HeadroomConfig:
-    """Configuration for Headroom plugin."""
-    enabled: bool = True
-    compress_tool_outputs: bool = True
-    compress_code: bool = True
-    compress_json: bool = True
-    min_content_length: int = 200  # Only compress content longer than this
-    target_ratio: float = 0.3  # Target compression ratio (0.3 = keep 30%)
 
 
 class HeadroomPlugin(Plugin):

@@ -35,10 +35,15 @@ def main():
 
     import uvicorn
 
+    # Set environment variables for create_app to read (HA_* backward compatible)
+    os.environ["HA_HOST"] = args.host
+    os.environ["HA_PORT"] = str(args.port)
     os.environ["HA_CORES"] = str(args.cores)
     os.environ["HA_DRIVER"] = args.driver
     if args.model:
         os.environ["HA_MODEL"] = args.model
+    else:
+        os.environ.pop("HA_MODEL", None)
 
     uvicorn.run(
         "api.app:app_instance",

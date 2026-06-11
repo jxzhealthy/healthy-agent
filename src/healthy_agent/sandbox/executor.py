@@ -31,10 +31,14 @@ class Sandbox:
     
     def __init__(
         self,
-        timeout: int = 30,
-        max_memory_mb: int = 512,
+        timeout: int | None = None,
+        max_memory_mb: int | None = None,
         allowed_commands: Optional[List[str]] = None
     ):
+        if timeout is None or max_memory_mb is None:
+            from healthy_agent.config.settings import settings
+            timeout = timeout if timeout is not None else settings.sandbox.timeout
+            max_memory_mb = max_memory_mb if max_memory_mb is not None else settings.sandbox.max_memory_mb
         self.timeout = timeout
         self.max_memory_mb = max_memory_mb
         self.allowed_commands = allowed_commands

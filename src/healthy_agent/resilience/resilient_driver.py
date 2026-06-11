@@ -35,8 +35,21 @@ class ResilientDriver(LLMDriver):
     ):
         self._primary = primary
         self._fallback = fallback
-        self._retry_policy = retry_policy or RetryPolicy()
-        self._circuit_breaker = circuit_breaker or CircuitBreaker()
+        if retry_policy is None:
+            from healthy_agent.config.settings import settings
+            retry_policy = RetryPolicy(
+                max_retries=settings.resilience.max_retries,
+                base_delay=settings.resilience.base_delay,
+                max_delay=settings.resilience.max_delay,
+            )
+        if circuit_breaker is None:
+            from healthy_agent.config.settings import settings
+            circuit_breaker = CircuitBreaker(
+                failure_threshold=settings.resilience.circuit_breaker_threshold,
+                recovery_timeout=settings.resilience.circuit_breaker_timeout,
+            )
+        self._retry_policy = retry_policy
+        self._circuit_breaker = circuit_breaker
     
     @property
     def name(self) -> str:

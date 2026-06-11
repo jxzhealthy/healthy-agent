@@ -41,10 +41,13 @@ class ConversationCompressor:
 
     def __init__(
         self,
-        max_tokens: int = 4000,
+        max_tokens: int | None = None,
         keep_recent: int = 10,
         summary_system_prompt: str = DEFAULT_SUMMARY_SYSTEM_PROMPT,
     ):
+        if max_tokens is None:
+            from healthy_agent.config.settings import settings
+            max_tokens = settings.compression.max_tokens_threshold
         self.max_tokens = max_tokens
         self.keep_recent = keep_recent
         self.summary_system_prompt = summary_system_prompt

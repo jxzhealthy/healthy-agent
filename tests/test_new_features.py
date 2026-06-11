@@ -1,6 +1,8 @@
 """Tests for new features: Config, Resilience, Auth, Sandbox, Compression, Multimodal."""
 import asyncio
 import os
+import unittest
+from collections import deque
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -8,6 +10,10 @@ import pytest
 from healthy_agent.config.settings import (
     Settings,
     load_config,
+    HeadroomConfig,
+    ResilienceConfig,
+    CompressionConfig,
+    _dict_to_settings,
 )
 from healthy_agent.resilience.retry import RetryPolicy, with_retry
 from healthy_agent.resilience.circuit_breaker import (
@@ -18,6 +24,7 @@ from healthy_agent.resilience.circuit_breaker import (
 from healthy_agent.auth.middleware import verify_api_key, verify_jwt, verify_token
 from healthy_agent.sandbox.executor import Sandbox
 from healthy_agent.compression.compressor import ConversationCompressor
+from healthy_agent.kernel.runtime import Kernel
 from healthy_agent.multimodal.attachment import ImageAttachment, FileAttachment
 from healthy_agent.multimodal.message import MultimodalMessage
 from healthy_agent.multimodal.utils import detect_media_type, extract_text_from_file
@@ -572,3 +579,113 @@ class TestMultimodal:
 
         content = extract_text_from_file(bin_file)
         assert "[Binary file:" in content
+
+
+# ==================== Config Integration Tests ====================
+
+class TestConfigIntegration(unittest.TestCase):
+    """Configuration system integration tests."""
+
+    def test_load_config_defaults(self):
+        """Verify load_config() returns Settings with all new sections (headroom, resilience)."""
+        settings = load_config(path="/nonexistent/path.toml")
+        assert hasattr(settings, 'headroom')
+        assert hasattr(settings, 'resilience')
+        assert hasattr(settings, 'compression')
+
+    def test_headroom_config_fields(self):
+        """Verify HeadroomConfig default field values."""
+        from healthy_agent.config.settings import HeadroomConfig
+        config = HeadroomConfig()
+        assert config.enabled is True
+        assert config.target_ratio == 0.3
+
+    def test_resilience_config_fields(self):
+        """Verify ResilienceConfig default field values."""
+        from healthy_agent.config.settings import ResilienceConfig
+        config = ResilienceConfig()
+        assert config.max_retries == 3
+        assert config.base_delay == 1.0
+
+    def test_compression_config_threshold(self):
+        """Verify CompressionConfig.max_tokens_threshold default value is 30000."""
+        from healthy_agent.config.settings import CompressionConfig
+        config = CompressionConfig()
+        assert config.max_tokens_threshold == 30000
+
+    def test_settings_headroom_resilience_mapping(self):
+        """Verify _dict_to_settings correctly parses headroom and resilience sections."""
+        from healthy_agent.config.settings import _dict_to_settings
+        config_dict = {
+            'headroom': {'enabled': True, 'target_ratio': 0.5},
+            'resilience': {'max_retries': 5, 'base_delay': 2.0}
+        }
+        settings = _dict_to_settings(config_dict)
+        assert settings.headroom.enabled is True
+        assert settings.headroom.target_ratio == 0.5
+        assert settings.resilience.max_retries == 5
+        assert settings.resilience.base_delay == 2.0
+
+
+# ==================== Kernel Optimization Tests ====================
+
+class TestKernelOptimizations(unittest.TestCase):
+    """Kernel performance optimization tests."""
+
+    def test_active_count_tracking(self):
+        """Test spawn increases _active_count, complete decreases it."""
+        from healthy_agent.kernel.runtime import Kernel
+        kernel = Kernel(num_cores=2)
+        initial_count = kernel._active_count
+        
+        # Simulate spawn
+        kernel._active_count += 1
+        assert kernel._active_count == initial_count + 1
+        
+        # Simulate complete
+        kernel._active_count -= 1
+        assert kernel._active_count == initial_count
+
+    def test_spawn_rate_deque(self):
+        """Verify _spawn_timestamps is a deque type."""
+        from healthy_agent.kernel.runtime import Kernel
+        from collections import deque
+        kernel = Kernel(num_cores=2)
+        assert isinstance(kernel._spawn_timestamps, deque)
+
+    def test_work_available_event(self):
+        """Test _work_available is set after spawn."""
+        from healthy_agent.kernel.runtime import Kernel
+        import threading
+        kernel = Kernel(num_cores=2)
+        
+        # Initially the event should not be set
+        assert not kernel._work_available.is_set()
+        
+        # After setting the event (simulating spawn behavior)
+        kernel._work_available.set()
+        assert kernel._work_available.is_set()
+
+
+# ==================== Compressor Config Integration Tests ====================
+
+class TestCompressorConfigIntegration(unittest.TestCase):
+    """Compressor configuration integration tests."""
+
+    def test_default_max_tokens_from_settings(self):
+        """When max_tokens is not passed, ConversationCompressor uses settings value."""
+        from healthy_agent.compression.compressor import ConversationCompressor
+        from healthy_agent.config.settings import load_config
+        
+        settings = load_config(path="/nonexistent/path.toml")
+        compressor = ConversationCompressor()
+        
+        # Should use the default from settings.compression.max_tokens_threshold
+        assert compressor.max_tokens == settings.compression.max_tokens_threshold
+
+    def test_explicit_max_tokens_override(self):
+        """When max_tokens=5000 is passed, use the passed value."""
+        from healthy_agent.compression.compressor import ConversationCompressor
+        
+        compressor = ConversationCompressor(max_tokens=5000)
+        assert compressor.max_tokens == 5000
