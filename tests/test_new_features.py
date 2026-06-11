@@ -595,27 +595,23 @@ class TestConfigIntegration(unittest.TestCase):
 
     def test_headroom_config_fields(self):
         """Verify HeadroomConfig default field values."""
-        from healthy_agent.config.settings import HeadroomConfig
         config = HeadroomConfig()
         assert config.enabled is True
         assert config.target_ratio == 0.3
 
     def test_resilience_config_fields(self):
         """Verify ResilienceConfig default field values."""
-        from healthy_agent.config.settings import ResilienceConfig
         config = ResilienceConfig()
         assert config.max_retries == 3
         assert config.base_delay == 1.0
 
     def test_compression_config_threshold(self):
         """Verify CompressionConfig.max_tokens_threshold default value is 30000."""
-        from healthy_agent.config.settings import CompressionConfig
         config = CompressionConfig()
         assert config.max_tokens_threshold == 30000
 
     def test_settings_headroom_resilience_mapping(self):
         """Verify _dict_to_settings correctly parses headroom and resilience sections."""
-        from healthy_agent.config.settings import _dict_to_settings
         config_dict = {
             'headroom': {'enabled': True, 'target_ratio': 0.5},
             'resilience': {'max_retries': 5, 'base_delay': 2.0}
@@ -634,7 +630,6 @@ class TestKernelOptimizations(unittest.TestCase):
 
     def test_active_count_tracking(self):
         """Test spawn increases _active_count, complete decreases it."""
-        from healthy_agent.kernel.runtime import Kernel
         kernel = Kernel(num_cores=2)
         initial_count = kernel._active_count
         
@@ -648,15 +643,11 @@ class TestKernelOptimizations(unittest.TestCase):
 
     def test_spawn_rate_deque(self):
         """Verify _spawn_timestamps is a deque type."""
-        from healthy_agent.kernel.runtime import Kernel
-        from collections import deque
         kernel = Kernel(num_cores=2)
         assert isinstance(kernel._spawn_timestamps, deque)
 
     def test_work_available_event(self):
         """Test _work_available is set after spawn."""
-        from healthy_agent.kernel.runtime import Kernel
-        import threading
         kernel = Kernel(num_cores=2)
         
         # Initially the event should not be set

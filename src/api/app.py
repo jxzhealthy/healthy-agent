@@ -58,7 +58,7 @@ def create_app(
     skills_dir: str | None = None,
     config_path: str | None = None,
 ) -> FastAPI:
-    from healthy_agent.config.settings import load_config, Settings
+    from healthy_agent.config.settings import load_config
     cfg = load_config(path=config_path)
 
     # CLI overrides take precedence over config file
@@ -68,9 +68,6 @@ def create_app(
         cfg.driver.name = driver_name
     if model is not None:
         cfg.driver.model = model
-
-    # Store settings on module level for access by other components
-    app_settings = cfg
 
     from healthy_agent.observability.logging_config import setup_logging
     setup_logging(
